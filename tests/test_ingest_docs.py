@@ -145,7 +145,7 @@ class TestSubSplit:
         chunk = {
             "title": "Big Section",
             "insight": "Word " * (MAX_CHUNK_CHARS // 3),
-            "type": "finding",
+            "type": "document",
             "source": "doc:test.md",
             "_content_hash": "abc123",
         }
@@ -159,14 +159,14 @@ class TestSubSplit:
         chunk = {
             "title": "Section",
             "insight": "Content " * 500,
-            "type": "finding",
+            "type": "document",
             "source": "doc:test.md",
             "priority": "medium",
             "_content_hash": "abc123",
         }
         sub_chunks = ingester._sub_split(chunk)
         for sc in sub_chunks:
-            assert sc["type"] == "finding"
+            assert sc["type"] == "document"
             assert sc["source"] == "doc:test.md"
 
 
@@ -205,7 +205,7 @@ class TestMakeChunk:
         )
         assert chunk["title"] == "My Section"
         assert chunk["source"] == "doc:guide.md"
-        assert chunk["type"] == "finding"
+        assert chunk["type"] == "document"
         assert "_content_hash" in chunk
 
     def test_truncates_long_titles(self):

@@ -61,10 +61,6 @@ class DocsIngester:
             d = self.project_path / name
             if d.is_dir():
                 dirs.append(d)
-        # Also check home directory common locations
-        home_infos = Path.home() / "Desktop" / "INFOS"
-        if home_infos.is_dir():
-            dirs.append(home_infos)
         return dirs
 
     def _load_registry(self) -> dict[str, dict]:
@@ -193,7 +189,7 @@ class DocsIngester:
         return {
             "title": title,
             "insight": content[:MAX_CHUNK_CHARS],
-            "type": "finding",
+            "type": "document",
             "priority": "medium",
             "keywords": [],
             "source": f"doc:{source_path}",

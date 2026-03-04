@@ -196,9 +196,19 @@ class TestExtractFromJsonl:
             assert "title" in entry
             assert "insight" in entry
             assert "type" in entry
+            assert entry["type"] == "session"
             assert "priority" in entry
             assert "source" in entry
             assert entry["source"].startswith("session:")
+
+    def test_insight_includes_user_question(self, sample_jsonl):
+        ingester = SessionIngester.__new__(SessionIngester)
+        ingester._registry = {}
+
+        entries = ingester._extract_from_jsonl(sample_jsonl)
+        if entries:
+            # The insight should contain the user's question
+            assert "---" in entries[0]["insight"]
 
 
 class TestExtractDate:

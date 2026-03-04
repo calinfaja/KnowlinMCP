@@ -162,13 +162,27 @@ class SessionIngester:
 
         return (min(1.0, best_score), best_type)
 
+    def _extract_text(self, msg: dict) -> str:
+        """Extract text content from a message."""
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            parts = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(block.get("text", ""))
+            return "\n".join(parts).strip()
+        return ""
+
     def _extract_from_jsonl(self, path: Path) -> list[dict[str, Any]]:
         """Extract high-value entries from a JSONL transcript.
 
-        Phase 1: Parse messages, filter to assistant content.
-        Phase 2: Score and filter by importance threshold.
+        Pairs user+assistant messages into turns.
+        Scores each turn by importance and filters low-value content.
         """
         entries = []
+        last_user_text = ""
 
         try:
             with open(path) as f:
@@ -180,47 +194,55 @@ class SessionIngester:
                     except json.JSONDecodeError:
                         continue
 
-                    # Only process assistant messages
-                    if msg.get("role") != "assistant":
+                    role = msg.get("role")
+
+                    # Track last user message for pairing
+                    if role == "user":
+                        text = self._extract_text(msg)
+                        if text and len(text) > 10:
+                            last_user_text = text
                         continue
 
-                    # Extract text content
-                    content = ""
-                    if isinstance(msg.get("content"), str):
-                        content = msg["content"]
-                    elif isinstance(msg.get("content"), list):
-                        # Content blocks (text, tool_use, etc.)
-                        for block in msg["content"]:
-                            if isinstance(block, dict) and block.get("type") == "text":
-                                content += block.get("text", "") + "\n"
-
-                    content = content.strip()
-                    if len(content) < MIN_CONTENT_LENGTH:
+                    if role != "assistant":
                         continue
 
-                    # Score the content
-                    score, entry_type = self._score_content(content)
+                    # Extract assistant text
+                    assistant_text = self._extract_text(msg)
+                    if len(assistant_text) < MIN_CONTENT_LENGTH:
+                        continue
+
+                    # Score the assistant content
+                    score, entry_type = self._score_content(assistant_text)
                     if score < 0.3:
                         continue
 
-                    # Extract title from first meaningful line
-                    lines = content.split("\n")
+                    # Build title from user question or first meaningful line
                     title = ""
-                    for line_text in lines:
-                        clean = line_text.strip().lstrip("#").strip()
-                        if len(clean) > 10 and not clean.startswith("```"):
-                            title = clean[:100]
-                            break
+                    if last_user_text:
+                        title = last_user_text[:100]
                     if not title:
-                        title = content[:100]
+                        for line_text in assistant_text.split("\n"):
+                            clean = line_text.strip().lstrip("#").strip()
+                            if len(clean) > 10 and not clean.startswith("```"):
+                                title = clean[:100]
+                                break
+                    if not title:
+                        title = assistant_text[:100]
 
-                    # Get date from file name or modification time
+                    # Combine user question + assistant response for searchability
+                    insight_parts = []
+                    if last_user_text:
+                        insight_parts.append(last_user_text[:300])
+                        insight_parts.append("---")
+                    insight_parts.append(assistant_text[:2000])
+                    insight = "\n".join(insight_parts)[:2500]
+
                     date_str = self._extract_date(path)
 
                     entries.append({
                         "title": title,
-                        "insight": content[:500],  # Cap at 500 chars
-                        "type": entry_type,
+                        "insight": insight,
+                        "type": "session",
                         "priority": "high" if score > 0.7 else "medium",
                         "keywords": [],
                         "source": f"session:{path.name}",

@@ -69,89 +69,62 @@ def search(query, source, fmt, limit, since, until_date, entry_type, branch, min
     """Search the knowledge database."""
     root = _resolve_project(project)
 
-    # Determine which sources to search
-    sources = list(source) if source else ["kb"]
+    sources = list(source) if source else None
 
-    if "kb" in sources or not source:
+    # Detail retrieval mode (single entry by ID)
+    if entry_id:
         from kln_knowledge.db import KnowledgeDB
-
         try:
             db = KnowledgeDB(str(root))
         except Exception as e:
             if fmt == "json":
-                click.echo(json.dumps({"error": str(e), "results": []}))
+                click.echo(json.dumps({"error": str(e)}))
             else:
                 console.print(f"[red]ERROR: {e}[/red]")
             raise SystemExit(1)
 
-        # Detail retrieval mode
-        if entry_id:
-            entry = db.get(entry_id)
-            if not entry:
-                for e in db._entries:
-                    if e.get("id", "").startswith(entry_id):
-                        entry = e
-                        break
-            if entry:
-                if fmt == "json":
-                    click.echo(json.dumps(entry, indent=2))
-                else:
-                    click.echo(format_single_entry(entry))
-                return
+        entry = db.get(entry_id)
+        if not entry:
+            for e in db._entries:
+                if e.get("id", "").startswith(entry_id):
+                    entry = e
+                    break
+        if entry:
+            if fmt == "json":
+                click.echo(json.dumps(entry, indent=2))
             else:
-                if fmt == "json":
-                    click.echo(json.dumps({"error": f"Entry not found: {entry_id}"}))
-                else:
-                    console.print(f"[red]Entry not found: {entry_id}[/red]")
-                raise SystemExit(1)
+                click.echo(format_single_entry(entry))
+            return
+        if fmt == "json":
+            click.echo(json.dumps({"error": f"Entry not found: {entry_id}"}))
+        else:
+            console.print(f"[red]Entry not found: {entry_id}[/red]")
+        raise SystemExit(1)
 
-        if not query:
-            console.print("[red]Query is required (or use --id for detail retrieval)[/red]")
-            raise SystemExit(1)
+    if not query:
+        console.print("[red]Query is required (or use --id for detail retrieval)[/red]")
+        raise SystemExit(1)
 
-        # Multi-source search
-        all_results = []
+    # Use MultiSourceSearch for unified weighted RRF search
+    from kln_knowledge.multi_search import MultiSourceSearch
+    ms = MultiSourceSearch(str(root))
 
-        if "kb" in sources:
-            results = db.search(
-                query, limit=limit,
-                date_from=since, date_to=until_date,
-                entry_type=entry_type, branch=branch,
-            )
-            for r in results:
-                r["_source"] = "kb"
-            all_results.extend(results)
+    all_results = ms.search(
+        query,
+        sources=sources,
+        limit=limit,
+        date_from=since,
+        date_to=until_date,
+        entry_type=entry_type,
+        branch=branch,
+    )
 
-        if "sessions" in sources:
-            try:
-                sessions_db = KnowledgeDB(str(root), sub_store="sessions")
-                results = sessions_db.search(query, limit=limit, date_from=since, date_to=until_date)
-                for r in results:
-                    r["_source"] = "sessions"
-                all_results.extend(results)
-            except Exception:
-                pass
+    if min_score > 0:
+        all_results = [r for r in all_results if r.get("score", 0) >= min_score]
 
-        if "docs" in sources:
-            try:
-                docs_db = KnowledgeDB(str(root), sub_store="docs")
-                results = docs_db.search(query, limit=limit, date_from=since, date_to=until_date)
-                for r in results:
-                    r["_source"] = "docs"
-                all_results.extend(results)
-            except Exception:
-                pass
-
-        # Sort combined results by score, take top N
-        all_results.sort(key=lambda x: x.get("score", 0), reverse=True)
-        all_results = all_results[:limit]
-
-        if min_score > 0:
-            all_results = [r for r in all_results if r.get("score", 0) >= min_score]
-
-        formatter = FORMATTERS[fmt]
-        click.echo(formatter(all_results))
-        raise SystemExit(0 if all_results else 1)
+    formatter = FORMATTERS[fmt]
+    click.echo(formatter(all_results))
+    raise SystemExit(0 if all_results else 1)
 
 
 # =============================================================================
