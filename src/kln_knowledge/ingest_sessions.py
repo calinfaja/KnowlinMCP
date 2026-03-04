@@ -281,8 +281,36 @@ class SessionIngester:
         mtime = path.stat().st_mtime
         return datetime.fromtimestamp(mtime).strftime("%Y-%m-%d")
 
+    def _cleanup_deleted_files(self, current_file_keys: set[str]) -> int:
+        """Remove DB entries for session files no longer on disk."""
+        stale_keys = set(self._registry.keys()) - current_file_keys
+        if not stale_keys:
+            return 0
+
+        from kln_knowledge.db import KnowledgeDB
+
+        db = KnowledgeDB(str(self.project_path), sub_store="sessions")
+        removed = 0
+
+        for key in stale_keys:
+            entry_ids = self._registry[key].get("entry_ids", [])
+            if entry_ids:
+                db.remove_entries(entry_ids)
+                removed += len(entry_ids)
+                debug_log(f"Removed {len(entry_ids)} stale entries from {key}")
+            del self._registry[key]
+
+        if removed:
+            self._save_registry()
+        return removed
+
     def ingest(self, full: bool = False) -> int:
         """Ingest session transcripts into the sessions sub-store.
+
+        Handles the full sync lifecycle:
+        - Detects deleted session files and removes their entries
+        - Detects modified sessions and replaces old entries
+        - Skips unchanged sessions (by file hash)
 
         Args:
             full: If True, re-process all sessions regardless of registry.
@@ -296,6 +324,11 @@ class SessionIngester:
 
         # Find JSONL files
         jsonl_files = sorted(self.sessions_dir.glob("*.jsonl"))
+
+        # Cleanup entries for deleted files
+        current_file_keys = {p.name for p in jsonl_files}
+        self._cleanup_deleted_files(current_file_keys)
+
         if not jsonl_files:
             debug_log("No JSONL files found")
             return 0
@@ -319,20 +352,35 @@ class SessionIngester:
 
         debug_log(f"Processing {len(to_process)} session files...")
 
-        # Extract entries from all files
+        from kln_knowledge.db import KnowledgeDB
+
+        db = KnowledgeDB(str(self.project_path), sub_store="sessions")
+
+        # Remove old entries for files being re-processed
+        for path in to_process:
+            old_ids = self._registry.get(path.name, {}).get("entry_ids", [])
+            if old_ids:
+                db.remove_entries(old_ids)
+                debug_log(f"Removed {len(old_ids)} old entries for {path.name}")
+
+        # Extract entries from all files, track per-file counts
         all_entries = []
+        file_entry_counts: list[tuple[str, int]] = []
+
         for path in to_process:
             entries = self._extract_from_jsonl(path)
+            file_entry_counts.append((path.name, len(entries)))
             all_entries.extend(entries)
 
-            # Update registry
-            self._registry[path.name] = {
-                "hash": self._file_hash(path),
-                "processed": datetime.now().isoformat(),
-                "entries_extracted": len(entries),
-            }
-
         if not all_entries:
+            # Update registry even if no entries extracted (marks files as processed)
+            for path in to_process:
+                self._registry[path.name] = {
+                    "hash": self._file_hash(path),
+                    "processed": datetime.now().isoformat(),
+                    "entries_extracted": 0,
+                    "entry_ids": [],
+                }
             self._save_registry()
             return 0
 
@@ -344,10 +392,18 @@ class SessionIngester:
             e.pop("_importance_score", None)
 
         # Batch add to sessions sub-store
-        from kln_knowledge.db import KnowledgeDB
-
-        db = KnowledgeDB(str(self.project_path), sub_store="sessions")
         ids = db.batch_add(all_entries, check_duplicates=False)
+
+        # Distribute IDs back to registry per file
+        offset = 0
+        for file_key, count in file_entry_counts:
+            self._registry[file_key] = {
+                "hash": self._file_hash(self.sessions_dir / file_key),
+                "processed": datetime.now().isoformat(),
+                "entries_extracted": count,
+                "entry_ids": ids[offset:offset + count] if count > 0 else [],
+            }
+            offset += count
 
         self._save_registry()
         debug_log(f"Ingested {len(ids)} entries from {len(to_process)} sessions")

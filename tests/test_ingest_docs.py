@@ -414,6 +414,138 @@ class TestRegistry:
             assert "processed" in entry
             assert "chunk_hashes" in entry
             assert "chunk_count" in entry
+            assert "entry_ids" in entry
+            assert isinstance(entry["entry_ids"], list)
+
+
+class TestCleanup:
+    """Tests for stale entry cleanup on file deletion/modification."""
+
+    @patch("kln_knowledge.db.KnowledgeDB")
+    def test_deleted_file_entries_removed(self, mock_db_cls, tmp_path, docs_dir):
+        mock_db = MagicMock()
+        mock_db.batch_add.return_value = ["id1"]
+        mock_db.remove_entries.return_value = 1
+        mock_db_cls.return_value = mock_db
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / ".knowledge-db").mkdir()
+
+        # Create and ingest a doc
+        doc = docs_dir / "guide.md"
+        doc.write_text("# Guide\n\nThis is a guide with enough content to be chunked properly.")
+
+        ingester = DocsIngester(str(project), docs_path=str(docs_dir))
+        ingester.ingest()
+
+        # Verify registry has the file with entry_ids
+        assert len(ingester._registry) == 1
+        file_key = list(ingester._registry.keys())[0]
+        assert ingester._registry[file_key]["entry_ids"] == ["id1"]
+
+        # Delete the file
+        doc.unlink()
+
+        # Re-ingest -- should detect deletion and remove entries
+        ingester2 = DocsIngester(str(project), docs_path=str(docs_dir))
+        ingester2.ingest()
+
+        # Registry should be empty now
+        assert len(ingester2._registry) == 0
+
+        # remove_entries should have been called with the old IDs
+        mock_db.remove_entries.assert_called_with(["id1"])
+
+    @patch("kln_knowledge.db.KnowledgeDB")
+    def test_modified_file_old_entries_replaced(self, mock_db_cls, tmp_path, docs_dir):
+        mock_db = MagicMock()
+        mock_db.batch_add.return_value = ["id1"]
+        mock_db.remove_entries.return_value = 1
+        mock_db_cls.return_value = mock_db
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / ".knowledge-db").mkdir()
+
+        doc = docs_dir / "guide.md"
+        doc.write_text("# Original\n\nOriginal content that is long enough to pass minimum threshold.")
+
+        ingester = DocsIngester(str(project), docs_path=str(docs_dir))
+        ingester.ingest()
+
+        # Modify the file
+        doc.write_text("# Updated\n\nCompletely different content that replaces the original version entirely.")
+
+        # New batch_add returns new IDs
+        mock_db.batch_add.return_value = ["id2"]
+
+        ingester2 = DocsIngester(str(project), docs_path=str(docs_dir))
+        ingester2.ingest()
+
+        # Old entries should be removed
+        mock_db.remove_entries.assert_called_with(["id1"])
+
+        # New IDs should be in registry
+        registry = json.loads((project / ".knowledge-db" / "doc-registry.json").read_text())
+        for entry in registry.values():
+            assert entry["entry_ids"] == ["id2"]
+
+    @patch("kln_knowledge.db.KnowledgeDB")
+    def test_entry_ids_stored_in_registry(self, mock_db_cls, tmp_path, docs_dir):
+        mock_db = MagicMock()
+        mock_db.batch_add.return_value = ["abc", "def", "ghi"]
+        mock_db_cls.return_value = mock_db
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / ".knowledge-db").mkdir()
+
+        doc = docs_dir / "multi.md"
+        doc.write_text(
+            "# Section One\n\nFirst section with enough content to be a chunk.\n\n"
+            "## Section Two\n\nSecond section with enough content to be another chunk.\n\n"
+            "## Section Three\n\nThird section with enough content for yet another chunk."
+        )
+
+        ingester = DocsIngester(str(project), docs_path=str(docs_dir))
+        ingester.ingest()
+
+        registry = json.loads((project / ".knowledge-db" / "doc-registry.json").read_text())
+        for entry in registry.values():
+            assert "entry_ids" in entry
+            assert len(entry["entry_ids"]) > 0
+
+    @patch("kln_knowledge.db.KnowledgeDB")
+    def test_backward_compat_no_entry_ids(self, mock_db_cls, tmp_path, docs_dir):
+        """Old registries without entry_ids should not crash."""
+        mock_db = MagicMock()
+        mock_db.batch_add.return_value = ["id1"]
+        mock_db_cls.return_value = mock_db
+
+        project = tmp_path / "project"
+        project.mkdir()
+        db_dir = project / ".knowledge-db"
+        db_dir.mkdir()
+
+        # Write an old-format registry (no entry_ids)
+        old_registry = {
+            "/old/file.md": {
+                "file_hash": "abc123",
+                "processed": "2026-01-01T00:00:00",
+                "chunk_hashes": ["h1"],
+                "chunk_count": 1,
+            }
+        }
+        (db_dir / "doc-registry.json").write_text(json.dumps(old_registry))
+
+        # Create a real doc to process
+        doc = docs_dir / "new.md"
+        doc.write_text("# New\n\nNew content that is long enough.")
+
+        # Should not crash
+        ingester = DocsIngester(str(project), docs_path=str(docs_dir))
+        ingester.ingest()
 
 
 class TestSourcesConfig:

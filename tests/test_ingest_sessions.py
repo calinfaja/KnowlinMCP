@@ -305,3 +305,94 @@ class TestRegistry:
         import json
         registry = json.loads(registry_path.read_text())
         assert "test-session.jsonl" in registry
+        assert "entry_ids" in registry["test-session.jsonl"]
+
+
+class TestCleanup:
+    """Tests for stale entry cleanup on file deletion/modification."""
+
+    @patch("kln_knowledge.db.KnowledgeDB")
+    def test_deleted_session_entries_removed(self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl):
+        mock_db = MagicMock()
+        mock_db.batch_add.return_value = ["id1"]
+        mock_db.remove_entries.return_value = 1
+        mock_db_cls.return_value = mock_db
+
+        ingester = SessionIngester(
+            str(project_with_sessions),
+            sessions_dir=str(session_dir),
+        )
+        ingester.ingest()
+
+        # Delete the session file
+        sample_jsonl.unlink()
+
+        # Re-ingest should detect deletion
+        ingester2 = SessionIngester(
+            str(project_with_sessions),
+            sessions_dir=str(session_dir),
+        )
+        ingester2.ingest()
+
+        # Old entries should be removed
+        mock_db.remove_entries.assert_called_with(["id1"])
+        assert len(ingester2._registry) == 0
+
+    @patch("kln_knowledge.db.KnowledgeDB")
+    def test_modified_session_old_entries_replaced(self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl):
+        mock_db = MagicMock()
+        mock_db.batch_add.return_value = ["id1"]
+        mock_db.remove_entries.return_value = 1
+        mock_db_cls.return_value = mock_db
+
+        ingester = SessionIngester(
+            str(project_with_sessions),
+            sessions_dir=str(session_dir),
+        )
+        ingester.ingest()
+
+        # Modify the session file (append a new message)
+        with open(sample_jsonl, "a") as f:
+            import json as j
+            f.write(j.dumps({
+                "role": "assistant",
+                "content": "The root cause of the problem was a configuration error. The fix resolved the timeout issue completely.",
+            }) + "\n")
+
+        # New ingest returns new IDs
+        mock_db.batch_add.return_value = ["id2", "id3"]
+
+        ingester2 = SessionIngester(
+            str(project_with_sessions),
+            sessions_dir=str(session_dir),
+        )
+        ingester2.ingest()
+
+        # Old entry should be removed
+        mock_db.remove_entries.assert_called_with(["id1"])
+
+    @patch("kln_knowledge.db.KnowledgeDB")
+    def test_backward_compat_no_entry_ids(self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl):
+        """Old registries without entry_ids should not crash."""
+        mock_db = MagicMock()
+        mock_db.batch_add.return_value = ["id1"]
+        mock_db_cls.return_value = mock_db
+
+        # Write old-format registry
+        import json as j
+        registry_path = project_with_sessions / ".knowledge-db" / "session-registry.json"
+        old_registry = {
+            "old-session.jsonl": {
+                "hash": "abc123",
+                "processed": "2026-01-01T00:00:00",
+                "entries_extracted": 5,
+            }
+        }
+        registry_path.write_text(j.dumps(old_registry))
+
+        # Should not crash
+        ingester = SessionIngester(
+            str(project_with_sessions),
+            sessions_dir=str(session_dir),
+        )
+        ingester.ingest()

@@ -340,8 +340,36 @@ class DocsIngester:
 
         return files
 
+    def _cleanup_deleted_files(self, current_file_keys: set[str]) -> int:
+        """Remove DB entries for files no longer on disk."""
+        stale_keys = set(self._registry.keys()) - current_file_keys
+        if not stale_keys:
+            return 0
+
+        from kln_knowledge.db import KnowledgeDB
+
+        db = KnowledgeDB(str(self.project_path), sub_store="docs")
+        removed = 0
+
+        for key in stale_keys:
+            entry_ids = self._registry[key].get("entry_ids", [])
+            if entry_ids:
+                db.remove_entries(entry_ids)
+                removed += len(entry_ids)
+                debug_log(f"Removed {len(entry_ids)} stale entries from {key}")
+            del self._registry[key]
+
+        if removed:
+            self._save_registry()
+        return removed
+
     def ingest(self, full: bool = False) -> int:
         """Ingest documents into the docs sub-store.
+
+        Handles the full sync lifecycle:
+        - Detects deleted files and removes their entries
+        - Detects modified files and replaces old entries
+        - Skips unchanged files (by file hash + chunk hash)
 
         Args:
             full: If True, re-process all docs regardless of registry.
@@ -350,6 +378,11 @@ class DocsIngester:
             Number of entries ingested.
         """
         doc_files = self._find_doc_files()
+
+        # Cleanup entries for deleted files
+        current_file_keys = {str(p) for p in doc_files}
+        self._cleanup_deleted_files(current_file_keys)
+
         if not doc_files:
             debug_log("No document files found")
             return 0
@@ -373,13 +406,28 @@ class DocsIngester:
 
         debug_log(f"Processing {len(to_process)} document files...")
 
+        from kln_knowledge.db import KnowledgeDB
+
+        db = KnowledgeDB(str(self.project_path), sub_store="docs")
+
+        # Remove old entries for files being re-processed
+        for path in to_process:
+            file_key = str(path)
+            old_ids = self._registry.get(file_key, {}).get("entry_ids", [])
+            if old_ids:
+                db.remove_entries(old_ids)
+                debug_log(f"Removed {len(old_ids)} old entries for {path.name}")
+
+        # Chunk and collect new entries, tracking per-file boundaries
         all_entries = []
+        file_entry_counts: list[tuple[str, int]] = []  # (file_key, count)
+
         for path in to_process:
             content = self._read_file(path)
             if not content:
+                file_entry_counts.append((str(path), 0))
                 continue
 
-            # Chunk by headings
             source_path = str(path.relative_to(self.docs_dirs[0]) if self.docs_dirs else path.name)
             chunks = self._chunk_by_headings(content, source_path)
 
@@ -402,26 +450,31 @@ class DocsIngester:
                 chunk.pop("_content_hash", None)
                 chunk.pop("_heading_hierarchy", None)
 
+            file_entry_counts.append((file_key, len(new_chunks)))
             all_entries.extend(new_chunks)
 
-            # Update registry
+            # Pre-populate registry (entry_ids filled after batch_add)
             self._registry[file_key] = {
                 "file_hash": self._file_hash(path),
                 "processed": datetime.now().isoformat(),
                 "chunk_hashes": new_hashes,
                 "chunk_count": len(chunks),
                 "new_chunks": len(new_chunks),
+                "entry_ids": [],  # filled below
             }
 
         if not all_entries:
             self._save_registry()
             return 0
 
-        # Batch add to docs sub-store
-        from kln_knowledge.db import KnowledgeDB
-
-        db = KnowledgeDB(str(self.project_path), sub_store="docs")
+        # Batch add and distribute IDs back to registry
         ids = db.batch_add(all_entries, check_duplicates=False)
+
+        offset = 0
+        for file_key, count in file_entry_counts:
+            if count > 0:
+                self._registry[file_key]["entry_ids"] = ids[offset:offset + count]
+                offset += count
 
         self._save_registry()
         debug_log(f"Ingested {len(ids)} entries from {len(to_process)} documents")
