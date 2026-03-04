@@ -44,10 +44,39 @@ kln-kb server start
 kln-kb stats
 ```
 
+## Source Configuration
+
+By default, the system auto-discovers docs from convention directories (`docs/`, `doc/`, `INFOS/`, `documentation/`) and sessions from `~/.claude/projects/`.
+
+For explicit control, create a sources config:
+
+```bash
+kln-kb sources --init    # Creates .knowledge-db/sources.yaml template
+kln-kb sources           # Show current configuration
+```
+
+```yaml
+# .knowledge-db/sources.yaml
+docs:
+  paths:
+    - docs/                    # relative to project root
+    - ~/Desktop/INFOS/         # absolute path (~ expanded)
+    - /shared/team-docs/       # another absolute path
+  include: ["*.md", "*.txt", "*.pdf", "*.rst"]  # default if omitted
+  exclude: ["drafts/**", "*.tmp"]
+
+sessions:
+  auto_discover: true          # scan ~/.claude/projects/ automatically
+  # path: ~/custom/sessions/  # explicit override
+```
+
+Without a `sources.yaml`, convention-based discovery is used. The CLI `--path` flag always overrides config.
+
 ## Architecture
 
 ```
 .knowledge-db/
+├── sources.yaml             # Source configuration (optional)
 ├── entries.jsonl            # Curated KB entries
 ├── embeddings.npy           # Dense embeddings (384-dim BGE-small)
 ├── sparse_index.json        # BM42 sparse vectors

@@ -8,7 +8,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kln_knowledge.ingest_docs import DocsIngester, MAX_CHUNK_CHARS, MIN_CHUNK_CHARS
+from kln_knowledge.ingest_docs import (
+    DocsIngester,
+    MAX_CHUNK_CHARS,
+    MIN_CHUNK_CHARS,
+    load_sources_config,
+    _resolve_paths,
+)
 
 
 @pytest.fixture
@@ -267,6 +273,8 @@ class TestFindDocFiles:
 
         ingester = DocsIngester.__new__(DocsIngester)
         ingester.docs_dirs = [docs_dir]
+        ingester._include_globs = None
+        ingester._exclude_globs = []
 
         files = ingester._find_doc_files()
         suffixes = {f.suffix.lower() for f in files}
@@ -279,6 +287,8 @@ class TestFindDocFiles:
 
         ingester = DocsIngester.__new__(DocsIngester)
         ingester.docs_dirs = [docs_dir]
+        ingester._include_globs = None
+        ingester._exclude_globs = []
 
         files = ingester._find_doc_files()
         assert any(f.suffix == ".pdf" for f in files)
@@ -404,3 +414,177 @@ class TestRegistry:
             assert "processed" in entry
             assert "chunk_hashes" in entry
             assert "chunk_count" in entry
+
+
+class TestSourcesConfig:
+    """Tests for sources.yaml configuration."""
+
+    def test_load_returns_none_when_no_file(self, tmp_path):
+        assert load_sources_config(tmp_path) is None
+
+    def test_load_parses_yaml(self, tmp_path):
+        config_path = tmp_path / "sources.yaml"
+        config_path.write_text("docs:\n  paths:\n    - docs/\n    - ~/INFOS/\n")
+        result = load_sources_config(tmp_path)
+        assert result is not None
+        assert result["docs"]["paths"] == ["docs/", "~/INFOS/"]
+
+    def test_load_handles_empty_file(self, tmp_path):
+        (tmp_path / "sources.yaml").write_text("")
+        result = load_sources_config(tmp_path)
+        assert result == {}
+
+    def test_load_handles_malformed_yaml(self, tmp_path):
+        (tmp_path / "sources.yaml").write_text(": : : invalid")
+        result = load_sources_config(tmp_path)
+        # Should not crash -- returns None on error
+        assert result is None
+
+    def test_resolve_relative_paths(self, tmp_path):
+        paths = _resolve_paths(["docs/", "src/notes/"], tmp_path)
+        assert paths[0] == (tmp_path / "docs").resolve()
+        assert paths[1] == (tmp_path / "src" / "notes").resolve()
+
+    def test_resolve_absolute_paths(self, tmp_path):
+        paths = _resolve_paths(["/tmp/shared-docs"], tmp_path)
+        assert paths[0] == Path("/tmp/shared-docs")
+
+    def test_resolve_tilde_expansion(self, tmp_path):
+        paths = _resolve_paths(["~/my-docs"], tmp_path)
+        assert str(paths[0]).startswith(str(Path.home()))
+
+    def test_docs_ingester_reads_config_paths(self, tmp_path):
+        project = tmp_path / "project"
+        project.mkdir()
+        db_dir = project / ".knowledge-db"
+        db_dir.mkdir()
+
+        custom_docs = tmp_path / "custom-docs"
+        custom_docs.mkdir()
+        (custom_docs / "guide.md").write_text("# Guide\n\nSome content here.")
+
+        config_path = db_dir / "sources.yaml"
+        config_path.write_text(f"docs:\n  paths:\n    - {custom_docs}\n")
+
+        ingester = DocsIngester(str(project))
+        assert custom_docs.resolve() in [d.resolve() for d in ingester.docs_dirs]
+
+    def test_docs_path_arg_overrides_config(self, tmp_path):
+        project = tmp_path / "project"
+        project.mkdir()
+        db_dir = project / ".knowledge-db"
+        db_dir.mkdir()
+
+        # Config says docs/
+        config_path = db_dir / "sources.yaml"
+        config_path.write_text("docs:\n  paths:\n    - docs/\n")
+
+        # But CLI says override/
+        override = tmp_path / "override"
+        override.mkdir()
+
+        ingester = DocsIngester(str(project), docs_path=str(override))
+        assert ingester.docs_dirs == [override.resolve()]
+
+    def test_include_globs_filter_files(self, tmp_path):
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        (docs / "readme.md").write_text("# Readme")
+        (docs / "notes.txt").write_text("Notes")
+        (docs / "data.csv").write_text("a,b,c")
+
+        ingester = DocsIngester.__new__(DocsIngester)
+        ingester.docs_dirs = [docs]
+        ingester._include_globs = ["*.md"]
+        ingester._exclude_globs = []
+
+        files = ingester._find_doc_files()
+        assert len(files) == 1
+        assert files[0].name == "readme.md"
+
+    def test_exclude_globs_filter_files(self, tmp_path):
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        drafts = docs / "drafts"
+        drafts.mkdir()
+        (docs / "readme.md").write_text("# Readme")
+        (drafts / "wip.md").write_text("# WIP")
+
+        ingester = DocsIngester.__new__(DocsIngester)
+        ingester.docs_dirs = [docs]
+        ingester._include_globs = None
+        ingester._exclude_globs = ["drafts/*"]
+
+        files = ingester._find_doc_files()
+        names = [f.name for f in files]
+        assert "readme.md" in names
+        assert "wip.md" not in names
+
+    def test_fallback_to_convention_when_no_config(self, tmp_path):
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / ".knowledge-db").mkdir()
+        (project / "docs").mkdir()
+        (project / "docs" / "guide.md").write_text("# Guide")
+
+        ingester = DocsIngester(str(project))
+        assert any("docs" in str(d) for d in ingester.docs_dirs)
+
+
+class TestSessionSourcesConfig:
+    """Tests for session ingester reading sources.yaml."""
+
+    def test_session_auto_discover_default(self, tmp_path):
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / ".knowledge-db").mkdir()
+
+        from kln_knowledge.ingest_sessions import SessionIngester
+        ingester = SessionIngester(str(project))
+        # auto_discover is True by default, sessions_dir may be None
+        # if no claude projects dir exists -- that's fine
+
+    def test_session_explicit_path_from_config(self, tmp_path):
+        project = tmp_path / "project"
+        project.mkdir()
+        db_dir = project / ".knowledge-db"
+        db_dir.mkdir()
+
+        custom_sessions = tmp_path / "my-sessions"
+        custom_sessions.mkdir()
+
+        config = db_dir / "sources.yaml"
+        config.write_text(f"sessions:\n  path: {custom_sessions}\n")
+
+        from kln_knowledge.ingest_sessions import SessionIngester
+        ingester = SessionIngester(str(project))
+        assert ingester.sessions_dir == custom_sessions.resolve()
+
+    def test_session_arg_overrides_config(self, tmp_path):
+        project = tmp_path / "project"
+        project.mkdir()
+        db_dir = project / ".knowledge-db"
+        db_dir.mkdir()
+
+        config = db_dir / "sources.yaml"
+        config.write_text("sessions:\n  path: /some/path\n")
+
+        override = tmp_path / "override-sessions"
+        override.mkdir()
+
+        from kln_knowledge.ingest_sessions import SessionIngester
+        ingester = SessionIngester(str(project), sessions_dir=str(override))
+        assert ingester.sessions_dir == override
+
+    def test_session_auto_discover_false_disables(self, tmp_path):
+        project = tmp_path / "project"
+        project.mkdir()
+        db_dir = project / ".knowledge-db"
+        db_dir.mkdir()
+
+        config = db_dir / "sources.yaml"
+        config.write_text("sessions:\n  auto_discover: false\n")
+
+        from kln_knowledge.ingest_sessions import SessionIngester
+        ingester = SessionIngester(str(project))
+        assert ingester.sessions_dir is None

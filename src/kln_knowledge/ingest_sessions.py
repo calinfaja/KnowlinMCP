@@ -66,17 +66,28 @@ class SessionIngester:
 
         Args:
             project_path: Project root directory
-            sessions_dir: Custom sessions directory. If None, uses
-                          ~/.claude/projects/ matching the project.
+            sessions_dir: Custom sessions directory. If None, reads from
+                          sources.yaml or auto-discovers from ~/.claude/projects/.
         """
         self.project_path = Path(project_path).resolve()
         self.db_path = self.project_path / ".knowledge-db"
         self.registry_path = self.db_path / "session-registry.json"
 
+        # Load sources config
+        from kln_knowledge.ingest_docs import load_sources_config, _resolve_paths
+        sources_config = load_sources_config(self.db_path)
+        sessions_config = (sources_config or {}).get("sessions", {})
+
         if sessions_dir:
+            # Explicit arg always wins
             self.sessions_dir = Path(sessions_dir)
-        else:
+        elif sessions_config.get("path"):
+            paths = _resolve_paths([sessions_config["path"]], self.project_path)
+            self.sessions_dir = paths[0] if paths else None
+        elif sessions_config.get("auto_discover", True):
             self.sessions_dir = self._find_sessions_dir()
+        else:
+            self.sessions_dir = None
 
         self._registry: dict[str, dict] = self._load_registry()
 

@@ -8,10 +8,12 @@ Pipeline:
 5. Batch embed new/changed chunks into docs sub-store
 
 Registry tracks processed files and their chunk hashes.
+Sources config (.knowledge-db/sources.yaml) declares the corpus.
 """
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import re
@@ -26,6 +28,43 @@ MAX_CHUNK_CHARS = 1600   # ~400 tokens
 MIN_CHUNK_CHARS = 50     # Merge tiny chunks with neighbors
 OVERLAP_CHARS = 200      # ~50 tokens overlap for sub-splits
 
+SOURCES_CONFIG_FILE = "sources.yaml"
+
+
+def load_sources_config(db_path: Path) -> dict | None:
+    """Load .knowledge-db/sources.yaml if it exists.
+
+    Returns parsed dict or None if no config file.
+    """
+    config_path = db_path / SOURCES_CONFIG_FILE
+    if not config_path.exists():
+        return None
+    try:
+        import yaml
+        return yaml.safe_load(config_path.read_text()) or {}
+    except ImportError:
+        debug_log("pyyaml not installed, ignoring sources.yaml")
+        return None
+    except Exception as e:
+        debug_log(f"Failed to read {config_path}: {e}")
+        return None
+
+
+def _resolve_paths(paths: list[str], project_root: Path) -> list[Path]:
+    """Resolve a list of path strings to absolute Path objects.
+
+    Supports: relative (to project root), absolute, ~ expansion.
+    """
+    resolved = []
+    for p in paths:
+        expanded = Path(p).expanduser()
+        if not expanded.is_absolute():
+            expanded = (project_root / expanded).resolve()
+        else:
+            expanded = expanded.resolve()
+        resolved.append(expanded)
+    return resolved
+
 
 class DocsIngester:
     """Ingest markdown and PDF documents into knowledge DB."""
@@ -39,22 +78,35 @@ class DocsIngester:
 
         Args:
             project_path: Project root directory
-            docs_path: Path to docs directory. If None, looks for
-                       common doc directories (docs/, doc/, INFOS/).
+            docs_path: Path to docs directory. If None, reads from
+                       sources.yaml or scans for common doc dirs.
         """
         self.project_path = Path(project_path).resolve()
         self.db_path = self.project_path / ".knowledge-db"
         self.registry_path = self.db_path / "doc-registry.json"
 
+        # Load sources config (may be None)
+        self._sources_config = load_sources_config(self.db_path)
+        docs_config = (self._sources_config or {}).get("docs", {})
+
         if docs_path:
+            # CLI --path flag always wins
             self.docs_dirs = [Path(docs_path).resolve()]
+        elif docs_config.get("paths"):
+            self.docs_dirs = _resolve_paths(
+                docs_config["paths"], self.project_path
+            )
         else:
             self.docs_dirs = self._find_docs_dirs()
+
+        # Include/exclude globs from config
+        self._include_globs = docs_config.get("include")
+        self._exclude_globs = docs_config.get("exclude", [])
 
         self._registry: dict[str, dict] = self._load_registry()
 
     def _find_docs_dirs(self) -> list[Path]:
-        """Find documentation directories in the project."""
+        """Find documentation directories in the project (convention-based)."""
         candidates = ["docs", "doc", "INFOS", "documentation"]
         dirs = []
         for name in candidates:
@@ -254,16 +306,37 @@ class DocsIngester:
         return [text[i:i + max_size] for i in range(0, len(text), max_size - OVERLAP_CHARS)]
 
     def _find_doc_files(self) -> list[Path]:
-        """Find all markdown and PDF files in docs directories."""
+        """Find document files using include/exclude globs from config."""
         files = []
-        extensions = {".md", ".markdown", ".txt", ".pdf"}
+
+        if self._include_globs:
+            # Config specifies include patterns -- use those as the extension filter
+            extensions = None  # globs handle filtering
+        else:
+            extensions = {".md", ".markdown", ".txt", ".pdf", ".rst"}
 
         for docs_dir in self.docs_dirs:
             if not docs_dir.exists():
                 continue
             for path in sorted(docs_dir.rglob("*")):
-                if path.is_file() and path.suffix.lower() in extensions:
-                    files.append(path)
+                if not path.is_file():
+                    continue
+                rel = str(path.relative_to(docs_dir))
+
+                # Include filter
+                if self._include_globs:
+                    if not any(fnmatch.fnmatch(rel, g) or fnmatch.fnmatch(path.name, g)
+                               for g in self._include_globs):
+                        continue
+                elif extensions and path.suffix.lower() not in extensions:
+                    continue
+
+                # Exclude filter
+                if any(fnmatch.fnmatch(rel, g) or fnmatch.fnmatch(path.name, g)
+                       for g in self._exclude_globs):
+                    continue
+
+                files.append(path)
 
         return files
 

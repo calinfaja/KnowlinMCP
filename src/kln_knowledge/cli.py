@@ -412,5 +412,72 @@ def ingest_all(full, project):
     console.print(f"Total: {total} entries ingested")
 
 
+# =============================================================================
+# sources
+# =============================================================================
+
+
+_SOURCES_TEMPLATE = """\
+# KLN Knowledge System - Source Configuration
+# Declares which documents and sessions to index.
+# Paths are relative to the project root unless absolute.
+
+docs:
+  paths:
+    - docs/                    # relative to project root
+    # - ~/Desktop/INFOS/       # absolute path (~ expanded)
+    # - /shared/team-docs/     # another absolute path
+  # include: ["*.md", "*.txt", "*.pdf", "*.rst"]  # default if omitted
+  # exclude: ["drafts/**", "*.tmp"]
+
+sessions:
+  auto_discover: true          # scan ~/.claude/projects/ automatically
+  # path: ~/custom/sessions/  # explicit override (disables auto-discover)
+"""
+
+
+@main.command()
+@click.option("--init", "do_init", is_flag=True, help="Create a template sources.yaml")
+@click.option("--project", "-p", help="Project path")
+def sources(do_init, project):
+    """Show or initialize source configuration."""
+    root = _resolve_project(project)
+    config_path = root / ".knowledge-db" / "sources.yaml"
+
+    if do_init:
+        if config_path.exists():
+            console.print(f"[yellow]Already exists: {config_path}[/yellow]")
+            console.print("Edit it directly to change sources.")
+            return
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(_SOURCES_TEMPLATE)
+        console.print(f"Created {config_path}")
+        console.print("Edit it to configure your document sources.")
+        return
+
+    # Show current config
+    if config_path.exists():
+        console.print(f"[bold]Sources config:[/bold] {config_path}\n")
+        click.echo(config_path.read_text())
+    else:
+        console.print("[dim]No sources.yaml found (using convention-based discovery)[/dim]")
+        console.print(f"Run [bold]kln-kb sources --init[/bold] to create one.")
+
+        # Show what convention-based discovery finds
+        from kln_knowledge.ingest_docs import DocsIngester
+        ingester = DocsIngester.__new__(DocsIngester)
+        ingester.project_path = root
+        ingester._sources_config = None
+        ingester._include_globs = None
+        ingester._exclude_globs = []
+        dirs = ingester._find_docs_dirs()
+        if dirs:
+            console.print("\n[bold]Auto-discovered doc dirs:[/bold]")
+            for d in dirs:
+                console.print(f"  {d}")
+        else:
+            console.print("\n[dim]No doc directories found (docs/, doc/, INFOS/, documentation/)[/dim]")
+
+
 if __name__ == "__main__":
     main()
