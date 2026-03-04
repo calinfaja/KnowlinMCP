@@ -167,7 +167,9 @@ class MultiSourceSearch:
         for source in ["kb", "sessions", "docs"]:
             store = self._get_store(source)
             if store is not None:
-                result[source] = store.stats()
+                st = store.stats()
+                st["available"] = True
+                result[source] = st
             else:
                 result[source] = {"count": 0, "available": False}
         return result

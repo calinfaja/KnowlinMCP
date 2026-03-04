@@ -238,9 +238,16 @@ class DocsIngester:
         if len(title) > 100:
             title = title[:97] + "..."
 
+        # Contextual enrichment: prepend heading hierarchy so embeddings
+        # capture document structure (Anthropic contextual retrieval: +20-49%)
+        if hierarchy:
+            insight = f"{hierarchy}\n\n{content}"[:MAX_CHUNK_CHARS]
+        else:
+            insight = content[:MAX_CHUNK_CHARS]
+
         return {
             "title": title,
-            "insight": content[:MAX_CHUNK_CHARS],
+            "insight": insight,
             "type": "document",
             "priority": "medium",
             "keywords": [],
@@ -249,7 +256,6 @@ class DocsIngester:
             "timestamp": datetime.now().isoformat(),
             "branch": "",
             "related_to": [],
-            "_heading_hierarchy": hierarchy,
             "_content_hash": self._content_hash(content),
         }
 
@@ -448,7 +454,6 @@ class DocsIngester:
             # Clean internal fields before adding
             for chunk in new_chunks:
                 chunk.pop("_content_hash", None)
-                chunk.pop("_heading_hierarchy", None)
 
             file_entry_counts.append((file_key, len(new_chunks)))
             all_entries.extend(new_chunks)

@@ -289,29 +289,46 @@ def server_status(project):
 @click.option("--json", "json_output", is_flag=True, help="Output as JSON")
 @click.option("--project", "-p", help="Project path")
 def stats(json_output, project):
-    """Show database statistics."""
-    from kln_knowledge.db import KnowledgeDB
+    """Show database statistics for all sources."""
+    from kln_knowledge.multi_search import MultiSourceSearch
 
     root = _resolve_project(project)
 
     try:
-        db = KnowledgeDB(str(root))
+        ms = MultiSourceSearch(str(root))
+        all_stats = ms.stats()
     except Exception as e:
         console.print(f"[red]ERROR: {e}[/red]")
         raise SystemExit(1)
 
-    st = db.stats()
-
     if json_output:
-        click.echo(json.dumps(st, indent=2))
-    else:
-        console.print(f"Knowledge DB: {st['db_path']}")
-        console.print(f"Backend: {st['backend']}")
-        console.print(f"Entries: {st['count']}")
-        console.print(f"Size: {st['size_human']}")
-        console.print(f"Last updated: {st['last_updated']}")
-        if st.get("sub_store"):
-            console.print(f"Sub-store: {st['sub_store']}")
+        click.echo(json.dumps(all_stats, indent=2))
+        return
+
+    table = Table(title="Knowledge DB Statistics")
+    table.add_column("Source", style="cyan")
+    table.add_column("Entries", justify="right")
+    table.add_column("Size", justify="right")
+    table.add_column("Last Updated")
+
+    total_count = 0
+    for source in ["kb", "sessions", "docs"]:
+        st = all_stats.get(source, {})
+        count = st.get("count", 0)
+        total_count += count
+        if not st.get("available", count > 0):
+            table.add_row(source, "[dim]--[/dim]", "[dim]--[/dim]", "[dim]not initialized[/dim]")
+        else:
+            table.add_row(
+                source,
+                str(count),
+                st.get("size_human", "?"),
+                st.get("last_updated", "?"),
+            )
+
+    console.print(table)
+    console.print(f"\nTotal entries: {total_count}")
+    console.print(f"DB path: {root / '.knowledge-db'}")
 
 
 # =============================================================================
@@ -339,6 +356,155 @@ def rebuild(dense_only, batch_size, project):
     console.print(f"Rebuilding index (mode: {mode})...")
     count = db.rebuild_index(dense_only=dense_only, batch_size=batch_size)
     console.print(f"Rebuilt index with {count} entries")
+
+
+# =============================================================================
+# doctor
+# =============================================================================
+
+
+@main.command()
+@click.option("--fix", is_flag=True, help="Auto-fix issues where possible")
+@click.option("--project", "-p", help="Project path")
+def doctor(fix, project):
+    """Check knowledge system health."""
+    root = _resolve_project(project)
+    db_path = root / ".knowledge-db"
+    issues = []
+    ok_count = 0
+
+    def ok(msg):
+        nonlocal ok_count
+        ok_count += 1
+        console.print(f"  [green]OK[/green] {msg}")
+
+    def warn(msg):
+        issues.append(msg)
+        console.print(f"  [yellow]WARN[/yellow] {msg}")
+
+    def err(msg):
+        issues.append(msg)
+        console.print(f"  [red]FAIL[/red] {msg}")
+
+    console.print("[bold]Knowledge DB Health Check[/bold]\n")
+
+    # 1. DB directory exists
+    if not db_path.exists():
+        err("No .knowledge-db/ directory found")
+        console.print(f"\n{ok_count} ok, {len(issues)} issues")
+        raise SystemExit(1)
+    ok(f".knowledge-db/ exists at {db_path}")
+
+    # 2. Check each store
+    import numpy as np
+    for store_name, sub_store in [("kb", None), ("sessions", "sessions"), ("docs", "docs")]:
+        store_path = db_path / sub_store if sub_store else db_path
+        jsonl = store_path / "entries.jsonl"
+        emb = store_path / "embeddings.npy"
+        idx = store_path / "index.json"
+
+        if not jsonl.exists():
+            if sub_store:
+                console.print(f"  [dim]--[/dim] {store_name}: not initialized")
+            else:
+                warn(f"{store_name}: no entries.jsonl")
+            continue
+
+        # Count JSONL entries
+        jsonl_count = 0
+        with open(jsonl) as f:
+            for line in f:
+                if line.strip():
+                    jsonl_count += 1
+
+        if not emb.exists():
+            warn(f"{store_name}: entries.jsonl ({jsonl_count}) but no embeddings.npy")
+            if fix:
+                from kln_knowledge.db import KnowledgeDB
+                console.print(f"    [cyan]Rebuilding {store_name} index...[/cyan]")
+                db = KnowledgeDB(str(root), sub_store=sub_store)
+                db.rebuild_index()
+                ok(f"{store_name}: rebuilt index")
+            continue
+
+        # Check embedding/JSONL alignment
+        embeddings = np.load(str(emb))
+        emb_count = len(embeddings)
+
+        if not idx.exists():
+            warn(f"{store_name}: embeddings but no index.json")
+            continue
+
+        with open(idx) as f:
+            index_map = json.load(f)
+        idx_count = len(index_map)
+
+        if emb_count == idx_count == jsonl_count:
+            ok(f"{store_name}: {jsonl_count} entries aligned")
+        elif emb_count == idx_count and emb_count >= jsonl_count:
+            # Zeroed embeddings from soft-deletes
+            orphaned = emb_count - jsonl_count
+            if orphaned > 0:
+                warn(f"{store_name}: {orphaned} orphaned embeddings (run rebuild to compact)")
+                if fix:
+                    from kln_knowledge.db import KnowledgeDB
+                    console.print(f"    [cyan]Compacting {store_name}...[/cyan]")
+                    db = KnowledgeDB(str(root), sub_store=sub_store)
+                    db.rebuild_index()
+                    ok(f"{store_name}: compacted")
+            else:
+                ok(f"{store_name}: {jsonl_count} entries aligned")
+        else:
+            err(f"{store_name}: misaligned - JSONL={jsonl_count}, embeddings={emb_count}, index={idx_count}")
+            if fix:
+                from kln_knowledge.db import KnowledgeDB
+                console.print(f"    [cyan]Rebuilding {store_name}...[/cyan]")
+                db = KnowledgeDB(str(root), sub_store=sub_store)
+                db.rebuild_index()
+                ok(f"{store_name}: rebuilt")
+
+    # 3. Check registries
+    for name, reg_path in [
+        ("session-registry", db_path / "session-registry.json"),
+        ("doc-registry", db_path / "doc-registry.json"),
+    ]:
+        if reg_path.exists():
+            try:
+                reg = json.loads(reg_path.read_text())
+                ok(f"{name}: {len(reg)} tracked files")
+            except json.JSONDecodeError:
+                err(f"{name}: corrupted JSON")
+                if fix:
+                    reg_path.unlink()
+                    ok(f"{name}: removed corrupted file")
+
+    # 4. Check sources config
+    sources_path = db_path / "sources.yaml"
+    if sources_path.exists():
+        try:
+            import yaml
+            config = yaml.safe_load(sources_path.read_text())
+            if config:
+                ok(f"sources.yaml: valid ({len(config)} sections)")
+                # Verify configured paths exist
+                docs_config = config.get("docs", {})
+                for p in docs_config.get("paths", []):
+                    resolved = Path(p).expanduser()
+                    if not resolved.is_absolute():
+                        resolved = (root / resolved).resolve()
+                    if not resolved.exists():
+                        warn(f"configured doc path missing: {p}")
+        except ImportError:
+            warn("pyyaml not installed (sources.yaml not readable)")
+        except Exception as e:
+            err(f"sources.yaml: {e}")
+    else:
+        console.print("  [dim]--[/dim] No sources.yaml (using convention discovery)")
+
+    # Summary
+    console.print(f"\n{ok_count} ok, {len(issues)} issues")
+    if issues:
+        raise SystemExit(1)
 
 
 # =============================================================================
