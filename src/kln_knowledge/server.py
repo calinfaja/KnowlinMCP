@@ -177,7 +177,21 @@ class KnowledgeServer:
                 branch = request.get("branch")
                 sources = request.get("sources")
 
-                if any([date_from, date_to, entry_type, branch]):
+                # Multi-source search
+                if sources and len(sources) > 1:
+                    from kln_knowledge.multi_search import MultiSourceSearch
+                    ms = MultiSourceSearch(str(self.project_root))
+                    results = ms.search(
+                        query, sources=sources, limit=limit,
+                        date_from=date_from, date_to=date_to,
+                        entry_type=entry_type, branch=branch,
+                    )
+                    response = {
+                        "results": results,
+                        "query": query,
+                        "multi_source": True,
+                    }
+                elif any([date_from, date_to, entry_type, branch]):
                     self.last_activity = time.time()
                     if not self.db:
                         response = {"error": "No index loaded"}
@@ -307,6 +321,27 @@ class KnowledgeServer:
                         response = {"status": "ok", "entry": entry}
                     else:
                         response = {"error": f"Entry not found: {entry_id}"}
+
+            elif cmd == "ingest":
+                source = request.get("source", "all")
+                full = request.get("full", False)
+                try:
+                    counts = {}
+                    if source in ("sessions", "all"):
+                        from kln_knowledge.ingest_sessions import SessionIngester
+                        si = SessionIngester(str(self.project_root))
+                        counts["sessions"] = si.ingest(full=full)
+                    if source in ("docs", "all"):
+                        from kln_knowledge.ingest_docs import DocsIngester
+                        di = DocsIngester(str(self.project_root))
+                        counts["docs"] = di.ingest(full=full)
+                    total = sum(counts.values())
+                    # Reload main index if entries were added
+                    if total > 0 and self.db:
+                        self.db._load_index()
+                    response = {"status": "ok", "counts": counts, "total": total}
+                except Exception as e:
+                    response = {"error": f"Ingest failed: {e}"}
 
             elif cmd == "reload":
                 if not self.db:
