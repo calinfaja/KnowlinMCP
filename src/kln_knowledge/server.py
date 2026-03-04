@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 
 from kln_knowledge.platform import (
-    cleanup_stale_files,
+    HOST,
     find_project_root,
     get_kb_pid_file,
     get_kb_port,
@@ -25,10 +25,7 @@ from kln_knowledge.platform import (
     get_project_hash,
     get_runtime_dir,
     is_process_running,
-    kill_process_tree,
-    read_pid_file,
     write_pid_file,
-    HOST,
 )
 
 IDLE_TIMEOUT = 3600  # 1 hour
@@ -159,14 +156,28 @@ class KnowledgeServer:
 
     def handle_client(self, conn: socket.socket) -> None:
         """Handle a client connection."""
-        self.last_activity = time.time()
         try:
-            data = conn.recv(4096).decode("utf-8")
+            conn.settimeout(30.0)
+            # Read until EOF (client must shutdown(SHUT_WR) after sending)
+            chunks = []
+            while True:
+                chunk = conn.recv(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                if len(b"".join(chunks)) > 1024 * 1024:  # 1 MiB cap
+                    conn.sendall(json.dumps({"error": "Request too large"}).encode())
+                    return
+            data = b"".join(chunks).decode("utf-8")
             if not data:
                 return
 
             request = json.loads(data)
             cmd = request.get("cmd", "search")
+
+            # Only update idle timer for meaningful commands (not ping/status)
+            if cmd not in ("ping", "status"):
+                self.last_activity = time.time()
 
             if cmd == "search":
                 query = request.get("query", "")
@@ -440,13 +451,19 @@ def send_command_to_port(
 ) -> dict | None:
     """Send command to server on specified port."""
     try:
-        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        client.settimeout(timeout)
-        client.connect((HOST, port))
-        client.sendall(json.dumps(cmd_data).encode("utf-8"))
-        response = client.recv(65536).decode("utf-8")
-        client.close()
-        return json.loads(response)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
+            client.settimeout(timeout)
+            client.connect((HOST, port))
+            client.sendall(json.dumps(cmd_data).encode("utf-8"))
+            client.shutdown(socket.SHUT_WR)  # signal end of request
+            # Read until EOF
+            chunks = []
+            while True:
+                chunk = client.recv(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            return json.loads(b"".join(chunks).decode("utf-8"))
     except Exception as e:
         return {"error": str(e)}
 

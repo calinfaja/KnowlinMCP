@@ -86,7 +86,9 @@ def find_project_root(start_path: Path | None = None) -> Path | None:
     looking for .knowledge-db, .serena, .claude, or .git directories.
     """
     if env_dir := os.environ.get("CLAUDE_PROJECT_DIR"):
-        return Path(env_dir)
+        p = Path(env_dir)
+        if p.is_dir():
+            return p
 
     current = Path(start_path or Path.cwd()).resolve()
 
@@ -137,6 +139,7 @@ def spawn_background(
         stdout = log_handle
         stderr = log_handle
     else:
+        log_handle = None
         stdout = subprocess.DEVNULL
         stderr = subprocess.DEVNULL
 
@@ -158,7 +161,12 @@ def spawn_background(
     else:
         kwargs["start_new_session"] = True
 
-    proc = subprocess.Popen(cmd, **kwargs)
+    try:
+        proc = subprocess.Popen(cmd, **kwargs)
+    except Exception:
+        if log_handle:
+            log_handle.close()
+        raise
     return proc.pid
 
 

@@ -6,12 +6,10 @@ intent-adjusted weighting and unified result ranking.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from kln_knowledge.db import KnowledgeDB
 from kln_knowledge.query_utils import (
-    QueryIntent,
     classify_query,
     expand_query,
     get_source_weights,
@@ -40,14 +38,16 @@ class MultiSourceSearch:
             try:
                 sub_store = None if source == "kb" else source
                 db = KnowledgeDB(self.project_path, sub_store=sub_store)
-                if db.count() > 0:
-                    self._stores[source] = db
-                else:
-                    self._stores[source] = None
+                # Always cache the db object - entries may be added later
+                self._stores[source] = db if db.count() > 0 else db
             except Exception as e:
                 debug_log(f"Failed to load {source} store: {e}")
                 self._stores[source] = None
-        return self._stores[source]
+        store = self._stores.get(source)
+        # Return None if store exists but is empty (no results to search)
+        if store is not None and store.count() == 0:
+            return None
+        return store
 
     def search(
         self,
@@ -125,14 +125,16 @@ class MultiSourceSearch:
         # Sort by weighted score descending
         all_results.sort(key=lambda x: x.get("_weighted_score", 0), reverse=True)
 
-        # Deduplicate by title similarity (exact match for now)
-        seen_titles = set()
+        # Deduplicate by title (or ID for untitled entries)
+        seen_keys = set()
         deduped = []
         for r in all_results:
             title = r.get("title", "").lower().strip()
-            if title and title in seen_titles:
+            dedup_key = title or r.get("id", "")
+            if dedup_key and dedup_key in seen_keys:
                 continue
-            seen_titles.add(title)
+            if dedup_key:
+                seen_keys.add(dedup_key)
             deduped.append(r)
 
         # Normalize scores to 0-1 range

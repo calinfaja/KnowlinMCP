@@ -7,13 +7,12 @@ fallback chain: server -> direct DB -> JSONL-only.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from kln_knowledge.platform import KB_DIR_NAME, HOST, get_kb_port_file
-from kln_knowledge.utils import debug_log, infer_type, is_server_running
+from kln_knowledge.platform import HOST, get_kb_port_file
+from kln_knowledge.utils import debug_log, infer_type
 
 
 def _get_current_branch() -> str:
@@ -136,12 +135,18 @@ def send_entry_to_server(entry: dict, project_path: str) -> bool:
         return False
 
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(5.0)
-        sock.connect((HOST, port))
-        sock.sendall(json.dumps({"cmd": "add", "entry": entry}).encode("utf-8"))
-        response = sock.recv(65536).decode("utf-8")
-        sock.close()
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(5.0)
+            sock.connect((HOST, port))
+            sock.sendall(json.dumps({"cmd": "add", "entry": entry}).encode("utf-8"))
+            sock.shutdown(socket.SHUT_WR)
+            chunks = []
+            while True:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            response = b"".join(chunks).decode("utf-8")
 
         result = json.loads(response)
         if result.get("status") == "ok":
@@ -165,12 +170,12 @@ def _notify_server_reload(project_path: str) -> None:
 
     try:
         port = int(port_file.read_text().strip())
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(5.0)
-        sock.connect((HOST, port))
-        sock.sendall(json.dumps({"cmd": "reload"}).encode("utf-8"))
-        sock.recv(4096)
-        sock.close()
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(5.0)
+            sock.connect((HOST, port))
+            sock.sendall(json.dumps({"cmd": "reload"}).encode("utf-8"))
+            sock.shutdown(socket.SHUT_WR)
+            sock.recv(4096)
         debug_log("Notified server to reload index")
     except Exception as e:
         debug_log(f"Server reload notification failed (non-fatal): {e}")
@@ -199,13 +204,16 @@ def save_entry(entry: dict, knowledge_dir: Path) -> bool:
         debug_log(f"KnowledgeDB.add() failed: {e}, falling back to JSONL-only")
 
     # Method 3: JSONL-only fallback
-    entries_file = knowledge_dir / "entries.jsonl"
-    with open(entries_file, "a") as f:
-        f.write(json.dumps(entry) + "\n")
-    debug_log("Entry appended to JSONL")
-    _notify_server_reload(project_path)
-
-    return True
+    try:
+        entries_file = knowledge_dir / "entries.jsonl"
+        with open(entries_file, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+        debug_log("Entry appended to JSONL")
+        _notify_server_reload(project_path)
+        return True
+    except OSError as e:
+        debug_log(f"JSONL fallback write failed: {e}")
+        return False
 
 
 def log_to_timeline(content: str, entry_type: str, knowledge_dir: Path) -> None:

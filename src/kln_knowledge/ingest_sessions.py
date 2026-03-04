@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -74,7 +73,7 @@ class SessionIngester:
         self.registry_path = self.db_path / "session-registry.json"
 
         # Load sources config
-        from kln_knowledge.ingest_docs import load_sources_config, _resolve_paths
+        from kln_knowledge.ingest_docs import _resolve_paths, load_sources_config
         sources_config = load_sources_config(self.db_path)
         sessions_config = (sources_config or {}).get("sessions", {})
 
@@ -112,7 +111,7 @@ class SessionIngester:
                 dir_name = d.name
                 # Convert /home/user/Project/foo to -home-user-Project-foo
                 mangled = project_str.replace("/", "-").lstrip("-")
-                if mangled in dir_name or dir_name in mangled:
+                if mangled in dir_name:
                     return d
 
         return None
@@ -196,7 +195,7 @@ class SessionIngester:
         last_user_text = ""
 
         try:
-            with open(path) as f:
+            with open(path, encoding="utf-8", errors="replace") as f:
                 for line in f:
                     if not line.strip():
                         continue
@@ -333,12 +332,14 @@ class SessionIngester:
             debug_log("No JSONL files found")
             return 0
 
-        # Filter to unprocessed files
+        # Filter to unprocessed files, caching hashes
         to_process = []
+        file_hashes: dict[str, str] = {}
         for path in jsonl_files:
             file_key = str(path.name)
             if not full:
                 current_hash = self._file_hash(path)
+                file_hashes[file_key] = current_hash
                 if (
                     file_key in self._registry
                     and self._registry[file_key].get("hash") == current_hash
@@ -363,12 +364,15 @@ class SessionIngester:
                 db.remove_entries(old_ids)
                 debug_log(f"Removed {len(old_ids)} old entries for {path.name}")
 
-        # Extract entries from all files, track per-file counts
+        # Extract entries from all files, sort per-file (not globally) to
+        # preserve file-to-ID mapping when distributing batch_add results
         all_entries = []
         file_entry_counts: list[tuple[str, int]] = []
 
         for path in to_process:
             entries = self._extract_from_jsonl(path)
+            # Sort within each file's entries (preserves per-file boundary)
+            entries.sort(key=lambda x: x.get("_importance_score", 0), reverse=True)
             file_entry_counts.append((path.name, len(entries)))
             all_entries.extend(entries)
 
@@ -376,7 +380,7 @@ class SessionIngester:
             # Update registry even if no entries extracted (marks files as processed)
             for path in to_process:
                 self._registry[path.name] = {
-                    "hash": self._file_hash(path),
+                    "hash": file_hashes.get(path.name) or self._file_hash(path),
                     "processed": datetime.now().isoformat(),
                     "entries_extracted": 0,
                     "entry_ids": [],
@@ -384,24 +388,32 @@ class SessionIngester:
             self._save_registry()
             return 0
 
-        # Sort by importance and take top entries
-        all_entries.sort(key=lambda x: x.get("_importance_score", 0), reverse=True)
-
-        # Remove internal scoring field
+        # Remove internal scoring field before DB add
         for e in all_entries:
             e.pop("_importance_score", None)
 
         # Batch add to sessions sub-store
         ids = db.batch_add(all_entries, check_duplicates=False)
 
+        # Guard: batch_add may silently filter entries
+        total_expected = sum(c for _, c in file_entry_counts)
+        if len(ids) != total_expected:
+            debug_log(
+                f"Warning: expected {total_expected} IDs, got {len(ids)}. "
+                "Some entries may have been filtered by DB validation."
+            )
+
         # Distribute IDs back to registry per file
         offset = 0
         for file_key, count in file_entry_counts:
+            file_ids = ids[offset:offset + count] if count > 0 else []
             self._registry[file_key] = {
-                "hash": self._file_hash(self.sessions_dir / file_key),
+                "hash": file_hashes.get(file_key) or self._file_hash(
+                    self.sessions_dir / file_key
+                ),
                 "processed": datetime.now().isoformat(),
                 "entries_extracted": count,
-                "entry_ids": ids[offset:offset + count] if count > 0 else [],
+                "entry_ids": file_ids,
             }
             offset += count
 

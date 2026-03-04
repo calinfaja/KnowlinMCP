@@ -195,9 +195,9 @@ class DocsIngester:
             heading_text = match.group(2).strip()
             heading_stack[level] = heading_text
             # Clear deeper levels
-            for l in list(heading_stack.keys()):
-                if l > level:
-                    del heading_stack[l]
+            for lvl in list(heading_stack.keys()):
+                if lvl > level:
+                    del heading_stack[lvl]
 
             last_heading = heading_text
             last_pos = match.end()
@@ -393,12 +393,14 @@ class DocsIngester:
             debug_log("No document files found")
             return 0
 
-        # Filter to changed files
+        # Filter to changed files, caching hashes
         to_process = []
+        file_hashes: dict[str, str] = {}
         for path in doc_files:
             file_key = str(path)
             if not full:
                 current_hash = self._file_hash(path)
+                file_hashes[file_key] = current_hash
                 if (
                     file_key in self._registry
                     and self._registry[file_key].get("file_hash") == current_hash
@@ -416,29 +418,47 @@ class DocsIngester:
 
         db = KnowledgeDB(str(self.project_path), sub_store="docs")
 
-        # Remove old entries for files being re-processed
+        # Collect old IDs to remove AFTER batch_add succeeds (crash-safe)
+        old_ids_by_file: dict[str, list[str]] = {}
         for path in to_process:
             file_key = str(path)
             old_ids = self._registry.get(file_key, {}).get("entry_ids", [])
             if old_ids:
-                db.remove_entries(old_ids)
-                debug_log(f"Removed {len(old_ids)} old entries for {path.name}")
+                old_ids_by_file[file_key] = old_ids
 
         # Chunk and collect new entries, tracking per-file boundaries
         all_entries = []
         file_entry_counts: list[tuple[str, int]] = []  # (file_key, count)
+        file_new_hashes: dict[str, list[str]] = {}
+        file_chunk_counts: dict[str, int] = {}
 
         for path in to_process:
+            file_key = str(path)
             content = self._read_file(path)
             if not content:
-                file_entry_counts.append((str(path), 0))
+                # Register empty/unreadable files so skip-check works next run
+                self._registry[file_key] = {
+                    "file_hash": file_hashes.get(file_key) or self._file_hash(path),
+                    "processed": datetime.now().isoformat(),
+                    "chunk_hashes": [],
+                    "chunk_count": 0,
+                    "new_chunks": 0,
+                    "entry_ids": [],
+                }
                 continue
 
-            source_path = str(path.relative_to(self.docs_dirs[0]) if self.docs_dirs else path.name)
+            # Find which docs_dir this path belongs to
+            source_path = path.name
+            for docs_dir in self.docs_dirs:
+                try:
+                    source_path = str(path.relative_to(docs_dir))
+                    break
+                except ValueError:
+                    continue
+
             chunks = self._chunk_by_headings(content, source_path)
 
             # Diff against existing chunks if file was previously processed
-            file_key = str(path)
             old_hashes = set(
                 self._registry.get(file_key, {}).get("chunk_hashes", [])
             )
@@ -456,30 +476,36 @@ class DocsIngester:
                 chunk.pop("_content_hash", None)
 
             file_entry_counts.append((file_key, len(new_chunks)))
+            file_new_hashes[file_key] = new_hashes
+            file_chunk_counts[file_key] = len(chunks)
             all_entries.extend(new_chunks)
 
-            # Pre-populate registry (entry_ids filled after batch_add)
-            self._registry[file_key] = {
-                "file_hash": self._file_hash(path),
-                "processed": datetime.now().isoformat(),
-                "chunk_hashes": new_hashes,
-                "chunk_count": len(chunks),
-                "new_chunks": len(new_chunks),
-                "entry_ids": [],  # filled below
-            }
-
         if not all_entries:
+            # Still update registry for empty/unchanged files
             self._save_registry()
             return 0
 
-        # Batch add and distribute IDs back to registry
+        # Batch add new entries
         ids = db.batch_add(all_entries, check_duplicates=False)
 
+        # Only NOW remove old entries (after batch_add succeeded)
+        for file_key, old_ids in old_ids_by_file.items():
+            db.remove_entries(old_ids)
+            debug_log(f"Removed {len(old_ids)} old entries for {Path(file_key).name}")
+
+        # Distribute IDs back to registry per file
         offset = 0
         for file_key, count in file_entry_counts:
-            if count > 0:
-                self._registry[file_key]["entry_ids"] = ids[offset:offset + count]
-                offset += count
+            file_ids = ids[offset:offset + count] if count > 0 else []
+            self._registry[file_key] = {
+                "file_hash": file_hashes.get(file_key) or self._file_hash(Path(file_key)),
+                "processed": datetime.now().isoformat(),
+                "chunk_hashes": file_new_hashes.get(file_key, []),
+                "chunk_count": file_chunk_counts.get(file_key, 0),
+                "new_chunks": count,
+                "entry_ids": file_ids,
+            }
+            offset += count
 
         self._save_registry()
         debug_log(f"Ingested {len(ids)} entries from {len(to_process)} documents")

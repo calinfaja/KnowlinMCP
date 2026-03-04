@@ -82,6 +82,8 @@ def expand_query(query: str) -> str:
     expansions = []
 
     for term, synonyms in _SYNONYMS.items():
+        if len(expansions) >= 3:
+            break
         if term in text:
             # Add synonyms that aren't already in the query
             for syn in synonyms:

@@ -6,8 +6,6 @@ Entry point: kln-kb
 from __future__ import annotations
 
 import json
-import os
-import sys
 from pathlib import Path
 
 import click
@@ -23,10 +21,9 @@ from kln_knowledge.platform import (
     is_process_running,
     kill_process_tree,
     read_pid_file,
-    spawn_background,
 )
 from kln_knowledge.search import FORMATTERS, format_single_entry
-from kln_knowledge.utils import is_kb_initialized, is_server_running
+from kln_knowledge.utils import is_server_running
 
 console = Console()
 
@@ -56,7 +53,11 @@ def main():
 @main.command()
 @click.argument("query", required=False, default="")
 @click.option("--source", "-s", multiple=True, help="Sources to search (kb, sessions, docs)")
-@click.option("--format", "-f", "fmt", type=click.Choice(["compact", "detailed", "inject", "json"]), default="detailed")
+@click.option(
+    "--format", "-f", "fmt",
+    type=click.Choice(["compact", "detailed", "inject", "json"]),
+    default="detailed",
+)
 @click.option("--limit", "-n", type=int, default=5)
 @click.option("--since", help="Entries from this date (YYYY-MM-DD)")
 @click.option("--until", "until_date", help="Entries up to this date (YYYY-MM-DD)")
@@ -65,7 +66,10 @@ def main():
 @click.option("--min-score", type=float, default=0.0, help="Minimum relevance score")
 @click.option("--id", "entry_id", help="Get specific entry by ID")
 @click.option("--project", "-p", help="Project path")
-def search(query, source, fmt, limit, since, until_date, entry_type, branch, min_score, entry_id, project):
+def search(
+    query, source, fmt, limit, since, until_date,
+    entry_type, branch, min_score, entry_id, project,
+):
     """Search the knowledge database."""
     root = _resolve_project(project)
 
@@ -134,9 +138,19 @@ def search(query, source, fmt, limit, since, until_date, entry_type, branch, min
 
 @main.command()
 @click.argument("content", required=False, default="")
-@click.option("--type", "entry_type", type=click.Choice(["finding", "solution", "pattern", "warning", "decision", "discovery"]), default="finding")
+@click.option(
+    "--type", "entry_type",
+    type=click.Choice(
+        ["finding", "solution", "pattern", "warning", "decision", "discovery"]
+    ),
+    default="finding",
+)
 @click.option("--tags", default="", help="Comma-separated keywords")
-@click.option("--priority", type=click.Choice(["low", "medium", "high", "critical"]), default="medium")
+@click.option(
+    "--priority",
+    type=click.Choice(["low", "medium", "high", "critical"]),
+    default="medium",
+)
 @click.option("--url", default="", help="Source URL")
 @click.option("--json-input", help="Structured JSON entry")
 @click.option("--json", "json_output", is_flag=True, help="Output as JSON")
@@ -178,7 +192,11 @@ def capture(content, entry_type, tags, priority, url, json_input, json_output, p
         )
 
     save_entry(entry, knowledge_dir)
-    log_to_timeline(entry.get("insight", content[:60]), entry.get("type", entry_type), knowledge_dir)
+    log_to_timeline(
+        entry.get("insight", content[:60]),
+        entry.get("type", entry_type),
+        knowledge_dir,
+    )
 
     if json_output:
         click.echo(json.dumps({
@@ -455,7 +473,10 @@ def doctor(fix, project):
             else:
                 ok(f"{store_name}: {jsonl_count} entries aligned")
         else:
-            err(f"{store_name}: misaligned - JSONL={jsonl_count}, embeddings={emb_count}, index={idx_count}")
+            err(
+                f"{store_name}: misaligned - "
+                f"JSONL={jsonl_count}, embeddings={emb_count}, index={idx_count}"
+            )
             if fix:
                 from kln_knowledge.db import KnowledgeDB
                 console.print(f"    [cyan]Rebuilding {store_name}...[/cyan]")
@@ -627,7 +648,7 @@ def sources(do_init, project):
         click.echo(config_path.read_text())
     else:
         console.print("[dim]No sources.yaml found (using convention-based discovery)[/dim]")
-        console.print(f"Run [bold]kln-kb sources --init[/bold] to create one.")
+        console.print("Run [bold]kln-kb sources --init[/bold] to create one.")
 
         # Show what convention-based discovery finds
         from kln_knowledge.ingest_docs import DocsIngester
@@ -642,7 +663,10 @@ def sources(do_init, project):
             for d in dirs:
                 console.print(f"  {d}")
         else:
-            console.print("\n[dim]No doc directories found (docs/, doc/, INFOS/, documentation/)[/dim]")
+            console.print(
+                "\n[dim]No doc directories found"
+                " (docs/, doc/, INFOS/, documentation/)[/dim]"
+            )
 
 
 if __name__ == "__main__":

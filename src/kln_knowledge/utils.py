@@ -16,8 +16,6 @@ from kln_knowledge.platform import (
     KB_DIR_NAME,
     get_kb_pid_file,
     get_kb_port_file,
-    get_runtime_dir,
-    is_process_running,
 )
 
 # =============================================================================
@@ -169,12 +167,12 @@ def migrate_entry(entry: dict) -> dict:
             else:
                 entry["source"] = source_path
         else:
-            found_date = entry.get("found_date", "")[:10]
+            found_date = (entry.get("found_date") or "")[:10]
             entry["source"] = f"conv:{found_date}" if found_date else "conv:unknown"
 
     # Map found_date -> date
     if "date" not in entry:
-        entry["date"] = entry.get("found_date", "")[:10]
+        entry["date"] = (entry.get("found_date") or "")[:10]
 
     # Infer type if not set or generic
     if entry.get("type") in [None, "", "lesson", "best-practice"]:
@@ -195,7 +193,7 @@ def migrate_entry(entry: dict) -> dict:
 
     # V3.1: Set timestamp from found_date
     if "timestamp" not in entry:
-        found_date = entry.get("found_date", "")
+        found_date = entry.get("found_date") or ""
         if found_date and "T" in found_date:
             entry["timestamp"] = found_date
         elif found_date:
@@ -249,13 +247,13 @@ def is_server_running(project_path: str | Path, timeout: float = 0.5) -> bool:
         return False
 
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        sock.connect((HOST, port))
-        sock.sendall(b'{"cmd":"ping"}')
-        response = sock.recv(1024).decode()
-        sock.close()
-        return '"pong"' in response
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            sock.connect((HOST, port))
+            sock.sendall(b'{"cmd":"ping"}')
+            sock.shutdown(socket.SHUT_WR)
+            response = sock.recv(1024).decode()
+            return '"pong"' in response
     except Exception:
         return False
 
@@ -294,16 +292,21 @@ def send_command(
         return None
 
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(timeout)
-        sock.connect((HOST, port))
-        sock.sendall(json.dumps(cmd_data).encode("utf-8"))
-        response = sock.recv(65536).decode("utf-8")
-        sock.close()
-        return json.loads(response)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            sock.connect((HOST, port))
+            sock.sendall(json.dumps(cmd_data).encode("utf-8"))
+            sock.shutdown(socket.SHUT_WR)
+            chunks = []
+            while True:
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            return json.loads(b"".join(chunks).decode("utf-8"))
     except Exception as e:
         debug_log(f"Send command failed: {e}")
-        return {"error": str(e)}
+        return None
 
 
 def search(

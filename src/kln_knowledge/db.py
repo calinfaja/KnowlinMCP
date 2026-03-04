@@ -25,7 +25,7 @@ from typing import Any, Optional
 import numpy as np
 
 from kln_knowledge.platform import find_project_root
-from kln_knowledge.utils import debug_log, infer_type, migrate_entry
+from kln_knowledge.utils import debug_log, migrate_entry
 
 # Fastembed imports
 try:
@@ -116,7 +116,9 @@ class KnowledgeDB:
         self.db_path = self.project_root / ".knowledge-db"
 
         if sub_store:
-            store_path = self.db_path / sub_store
+            store_path = (self.db_path / sub_store).resolve()
+            if not str(store_path).startswith(str(self.db_path.resolve())):
+                raise ValueError(f"sub_store '{sub_store}' escapes db_path")
             store_path.mkdir(parents=True, exist_ok=True)
             self.embeddings_path = store_path / "embeddings.npy"
             self.sparse_index_path = store_path / "sparse_index.json"
@@ -427,6 +429,10 @@ class KnowledgeDB:
         searchable_text = self._build_searchable_text(entry)
         embedding = list(self.dense_model.embed([searchable_text]))[0]
 
+        # Write JSONL first (source of truth), then update in-memory index
+        with open(self.jsonl_path, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+
         if self._embeddings is None:
             self._embeddings = embedding.reshape(1, -1)
         else:
@@ -442,9 +448,6 @@ class KnowledgeDB:
             self._sparse_vectors[row_idx] = sparse_vec
 
         self._save_index()
-
-        with open(self.jsonl_path, "a") as f:
-            f.write(json.dumps(entry) + "\n")
 
         return entry_id
 
@@ -702,19 +705,12 @@ class KnowledgeDB:
         return results
 
     def get(self, entry_id: str) -> Optional[dict[str, Any]]:
-        """Get a specific entry by ID."""
-        if not self.jsonl_path.exists():
-            return None
-
-        with open(self.jsonl_path) as f:
-            for line in f:
-                if line.strip():
-                    try:
-                        entry = json.loads(line)
-                        if isinstance(entry, dict) and entry.get("id") == entry_id:
-                            return migrate_entry(entry)
-                    except json.JSONDecodeError:
-                        pass
+        """Get a specific entry by ID (from in-memory index)."""
+        row = self._id_to_row.get(entry_id)
+        if row is not None and row < len(self._entries):
+            entry = self._entries[row]
+            if entry.get("title") != "?":  # Skip orphaned stubs
+                return entry.copy()
         return None
 
     def stats(self) -> dict[str, Any]:
@@ -818,19 +814,11 @@ class KnowledgeDB:
         return len(entries)
 
     def list_recent(self, limit: int = 10) -> list[dict[str, Any]]:
-        """List most recent entries."""
-        entries = []
-        if self.jsonl_path.exists():
-            with open(self.jsonl_path) as f:
-                for line in f:
-                    if line.strip():
-                        try:
-                            entry = json.loads(line)
-                            if isinstance(entry, dict):
-                                entries.append(migrate_entry(entry))
-                        except json.JSONDecodeError:
-                            pass
-
+        """List most recent entries (from in-memory index)."""
+        entries = [
+            e.copy() for e in self._entries
+            if e.get("title") != "?"  # Skip orphaned stubs
+        ]
         entries.sort(
             key=lambda x: (
                 x.get("date", "") or x.get("found_date", ""),
@@ -871,12 +859,12 @@ class KnowledgeDB:
                 for entry in entries:
                     f.write(json.dumps(entry) + "\n")
 
-            for i, entry in enumerate(self._entries):
-                if entry.get("id") in id_set:
-                    self._entries[i]["usage_count"] = entry.get("usage_count", 0) + 1
-                    self._entries[i]["last_used"] = now
-                    if self._entries[i]["usage_count"] >= 3:
-                        self._entries[i]["pinned"] = True
+            # Sync in-memory cache from the JSONL-updated entries
+            entries_by_id = {e["id"]: e for e in entries if e.get("id") in id_set}
+            for i, cached in enumerate(self._entries):
+                eid = cached.get("id")
+                if eid in entries_by_id:
+                    self._entries[i].update(entries_by_id[eid])
 
             self._enforce_pin_cap(entries)
 
@@ -896,9 +884,9 @@ class KnowledgeDB:
             for entry in entries:
                 f.write(json.dumps(entry) + "\n")
 
-        pinned_ids = {e.get("id") for e in entries if not e.get("pinned")}
+        unpinned_ids = {e.get("id") for e in entries if not e.get("pinned")}
         for i, cached in enumerate(self._entries):
-            if cached.get("id") in pinned_ids:
+            if cached.get("id") in unpinned_ids:
                 self._entries[i]["pinned"] = False
 
     def get_recent_important(self, limit: int = 3) -> list[dict[str, Any]]:

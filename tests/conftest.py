@@ -9,6 +9,23 @@ import numpy as np
 import pytest
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--integration",
+        action="store_true",
+        default=False,
+        help="Run integration tests that load real embedding models (slow)",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    if not config.getoption("--integration"):
+        skip = pytest.mark.skip(reason="Pass --integration to run")
+        for item in items:
+            if "integration" in item.keywords:
+                item.add_marker(skip)
+
+
 @pytest.fixture
 def temp_kb_dir(tmp_path):
     """Create temporary knowledge DB directory with project markers."""
