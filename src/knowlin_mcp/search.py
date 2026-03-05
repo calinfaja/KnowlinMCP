@@ -7,16 +7,21 @@ import json
 
 def format_compact(results: list[dict]) -> str:
     """Compact format for quick overview."""
+    if not results:
+        return "No results found."
     lines = []
     for i, r in enumerate(results, 1):
         title = r.get("title", "Untitled")
         entry_type = r.get("type", "")
+        source = r.get("_source", "")
         date = (r.get("date") or r.get("found_date", ""))[:10]
-        entry_id = r.get("id", "")[:8]
+        entry_id = r.get("id", "")[:12]
+        score = r.get("score", 0)
         insight = r.get("insight") or r.get("summary") or ""
         if len(insight) > 80:
             insight = insight[:77].rsplit(" ", 1)[0] + "..."
-        lines.append(f"{i}. [{entry_type}] {title} ({date}) [id:{entry_id}]")
+        tag = f"{entry_type}" if not source else f"{source}:{entry_type}"
+        lines.append(f"{i}. [{tag}] {title} ({score:.0%}, {date}) [id:{entry_id}]")
         if insight:
             lines.append(f"   {insight}")
     return "\n".join(lines)
@@ -24,13 +29,19 @@ def format_compact(results: list[dict]) -> str:
 
 def format_detailed(results: list[dict]) -> str:
     """Detailed format with all metadata."""
+    if not results:
+        return "No results found."
     lines = []
     for i, r in enumerate(results, 1):
         score = r.get("score", 0)
         title = r.get("title", "Untitled")
         entry_id = r.get("id", "")
+        source_label = r.get("_source", "")
         lines.append(f"\n{'=' * 60}")
-        lines.append(f"[{i}] {title} (score: {score:.2f})")
+        header = f"[{i}] {title} ({score:.0%})"
+        if source_label:
+            header += f" [{source_label}]"
+        lines.append(header)
         lines.append(f"{'=' * 60}")
         lines.append(f"ID: {entry_id}")
 
@@ -66,26 +77,21 @@ def format_inject(results: list[dict]) -> str:
     lines = ["RELEVANT PRIOR KNOWLEDGE:", ""]
 
     for r in results:
-        score = r.get("score", 0)
-        if score < 0.3:
-            continue
-
         title = r.get("title", "Untitled")
+        score = r.get("score", 0)
         lines.append(f"### {title} (relevance: {score:.0%})")
 
-        if r.get("url"):
-            lines.append(f"Source: {r['url']}")
-        if r.get("summary"):
-            lines.append(f"{r['summary']}")
-        if r.get("problem_solved"):
-            lines.append(f"Solves: {r['problem_solved']}")
-        if r.get("what_worked"):
-            lines.append(f"Solution: {r['what_worked']}")
+        insight = r.get("insight") or r.get("summary") or ""
+        if insight:
+            lines.append(insight)
+
+        etype = r.get("type", "")
+        source = r.get("_source") or r.get("source", "")
+        if etype or source:
+            meta = " | ".join(filter(None, [etype, source]))
+            lines.append(f"[{meta}]")
 
         lines.append("")
-
-    if len(lines) <= 2:
-        return "No highly relevant prior knowledge found."
 
     return "\n".join(lines)
 

@@ -1,64 +1,137 @@
 # KnowlinMCP
 
-Hybrid semantic knowledge database with MCP server and multi-source search. Captures, indexes, and retrieves project knowledge using dense embeddings (BGE-small-en-v1.5), sparse matching (BM42), and cross-encoder reranking.
+Per-project knowledge database with hybrid semantic search, exposed as an MCP server. Captures insights, indexes docs and session transcripts, retrieves them with dense + sparse + reranking search.
 
-## Features
+```
+                          KnowlinMCP
+  +-----------+     +-------------------+     +-----------+
+  | Claude    |     |   MCP Server      |     | .knowledge-db/
+  | Gemini    |<--->|   (stdio)         |<--->|   entries.jsonl
+  | Codex     |     |  knowlin_search   |     |   embeddings.npy
+  | Cursor    |     |  knowlin_get      |     |   sessions/
+  | VS Code   |     |  knowlin_stats    |     |   docs/
+  +-----------+     |  knowlin_ingest   |     +-----------+
+                    +-------------------+
+                            |
+  +-------------------------+-------------------------+
+  |                         |                         |
+  v                         v                         v
+  Dense Search          Sparse Search           Cross-encoder
+  (BGE-small 384d)      (BM42 attention)        Reranker
+  |                         |                         |
+  +------------+------------+                         |
+               |                                      |
+               v                                      |
+         RRF Fusion -------> Intent Weighting ------->+
+         (per source)        DEBUG -> sessions
+                             HOWTO -> docs
+                             RECALL -> sessions
+```
 
-- **MCP server**: Expose knowledge search to Claude, Gemini, Codex, Cursor, VS Code, and other MCP clients
-- **Hybrid search**: Dense + sparse + RRF fusion + cross-encoder reranking (~30ms via TCP server)
-- **Multi-source**: Search across curated KB, session transcripts, and documentation
-- **Intent-aware**: Query classification adjusts source weights (debug queries favor sessions, howto queries favor docs)
-- **Incremental ingestion**: SHA-256 registry tracks processed files, only re-processes changes
-- **Per-project isolation**: Each project gets its own `.knowledge-db/` with separate sub-stores
-
-## Installation
+## Install
 
 ```bash
-pip install knowlin-mcp
+git clone <repo> && cd knowlin-mcp
+./install.sh              # creates .venv, installs deps + MCP support
+./install.sh --with-pdf   # also install PDF ingestion
+```
 
-# With MCP server support
-pip install "knowlin-mcp[mcp]"
+Or manually:
+```bash
+pip install -e ".[mcp]"
+```
 
-# With PDF support
-pip install "knowlin-mcp[pdf]"
+## Quick Start (30 seconds)
+
+```bash
+# 1. Initialize in your project
+cd /your/project
+knowlin init                    # creates .knowledge-db/ + .mcp.json
+
+# 2. Index your docs
+knowlin ingest all              # indexes docs/ and Claude sessions
+
+# 3. Search
+knowlin search "authentication"
+```
+
+That's it. Claude Code (and other MCP clients) can now use `knowlin_search` automatically via the `.mcp.json` created by `init`.
+
+## How It Works
+
+**Three sources, one search:**
+
+| Source | What | Auto-discovered from |
+|--------|------|---------------------|
+| `kb` | Manually captured insights | `knowlin capture "..."` |
+| `docs` | Markdown, PDF, text files | `docs/`, `doc/`, or `sources.yaml` paths |
+| `sessions` | Claude Code transcripts | `~/.claude/projects/` |
+
+**Search pipeline:** Every query is classified by intent (debug? howto? recall?), then searched with dense embeddings + sparse keywords + RRF fusion per source, fused across sources with intent-aware weights, and reranked with a cross-encoder. ~30ms via TCP server.
+
+**Incremental ingestion:** SHA-256 file hashing tracks what's been processed. Only new or changed files are re-indexed. Run `knowlin ingest all` anytime -- it's fast.
+
+## CLI
+
+```bash
+# Search (default: compact format, all sources)
+knowlin search "query"
+knowlin search "query" -s kb -s docs       # specific sources
+knowlin search "query" -f detailed         # verbose output
+knowlin search "query" -f json             # machine-readable
+knowlin search "query" --type warning      # filter by type
+knowlin search "query" --since 2026-01-01  # date filter
+
+# Capture knowledge
+knowlin capture "JWT must be validated server-side" --type warning --tags "auth,jwt"
+
+# Ingest
+knowlin ingest all              # docs + sessions (incremental)
+knowlin ingest docs             # docs only
+knowlin ingest sessions         # sessions only
+knowlin ingest all --full       # force re-process everything
+
+# Manage
+knowlin init                    # set up project (.knowledge-db/ + .mcp.json)
+knowlin stats                   # entry counts per source
+knowlin doctor --fix            # health check and auto-repair
+knowlin sources --init          # create sources.yaml template
+knowlin server start            # TCP server for ~30ms queries (foreground)
+```
+
+Entry types: `finding`, `solution`, `pattern`, `warning`, `decision`, `discovery`
+
+## Source Configuration
+
+Without config, KnowlinMCP auto-discovers `docs/`, `doc/`, `INFOS/` directories and Claude sessions from `~/.claude/projects/`.
+
+For explicit control, edit `.knowledge-db/sources.yaml` (created by `knowlin init`):
+
+```yaml
+docs:
+  paths:
+    - docs/                       # relative to project root
+    - ~/Desktop/INFOS/            # absolute path (~ expanded)
+  # include: ["*.md", "*.txt", "*.pdf", "*.rst"]
+  # exclude: ["drafts/**", "*.tmp"]
+
+sessions:
+  auto_discover: true             # scan ~/.claude/projects/
 ```
 
 ## MCP Server
 
-KnowlinMCP exposes 4 tools to any MCP client via stdio transport:
+`knowlin init` writes `.mcp.json` for Claude Code. For other clients:
 
-| Tool | Description |
-|------|-------------|
-| `knowlin_search` | Hybrid semantic + keyword search with source/date/type filtering |
-| `knowlin_get` | Retrieve full entry details by ID |
-| `knowlin_stats` | Database statistics (entry counts, sizes, health) |
-| `knowlin_ingest` | Trigger docs/sessions ingestion |
-
-### Client Configuration
-
-**Claude Code** (`.mcp.json` at project root):
-```json
-{
-  "mcpServers": {
-    "knowlin-mcp": {
-      "command": "knowlin-mcp"
-    }
-  }
-}
-```
+<details>
+<summary>Gemini CLI, Codex, Cursor, VS Code</summary>
 
 **Gemini CLI** (`~/.gemini/settings.json`):
 ```json
-{
-  "mcpServers": {
-    "knowlin-mcp": {
-      "command": "knowlin-mcp"
-    }
-  }
-}
+{ "mcpServers": { "knowlin-mcp": { "command": "knowlin-mcp" } } }
 ```
 
-**OpenAI Codex CLI** (`~/.codex/config.toml`):
+**Codex CLI** (`~/.codex/config.toml`):
 ```toml
 [mcp_servers.knowlin-mcp]
 command = "knowlin-mcp"
@@ -66,192 +139,52 @@ command = "knowlin-mcp"
 
 **Cursor** (`.cursor/mcp.json`):
 ```json
-{
-  "mcpServers": {
-    "knowlin-mcp": {
-      "command": "knowlin-mcp"
-    }
-  }
-}
+{ "mcpServers": { "knowlin-mcp": { "command": "knowlin-mcp" } } }
 ```
 
-**VS Code / Copilot** (`.vscode/mcp.json`):
+**VS Code** (`.vscode/mcp.json`):
 ```json
-{
-  "servers": {
-    "knowlin-mcp": {
-      "type": "stdio",
-      "command": "knowlin-mcp"
-    }
-  }
-}
+{ "servers": { "knowlin-mcp": { "type": "stdio", "command": "knowlin-mcp" } } }
 ```
 
-## Quick Start
+</details>
 
-```bash
-# Capture knowledge
-knowlin capture "JWT tokens must be validated server-side" --type warning --tags "auth,security"
-
-# Search
-knowlin search "authentication best practices"
-
-# Search across all sources
-knowlin search "how to fix timeout" --source kb --source sessions --source docs
-
-# Ingest documentation
-knowlin ingest docs --path ./docs/
-
-# Ingest Claude Code sessions
-knowlin ingest sessions
-
-# Start the TCP server for fast searches
-knowlin server start
-
-# Show statistics
-knowlin stats
-```
-
-## Source Configuration
-
-By default, the system auto-discovers docs from convention directories (`docs/`, `doc/`, `INFOS/`, `documentation/`) and sessions from `~/.claude/projects/`.
-
-For explicit control, create a sources config:
-
-```bash
-knowlin sources --init    # Creates .knowledge-db/sources.yaml template
-knowlin sources           # Show current configuration
-```
-
-```yaml
-# .knowledge-db/sources.yaml
-docs:
-  paths:
-    - docs/                    # relative to project root
-    - ~/Desktop/INFOS/         # absolute path (~ expanded)
-    - /shared/team-docs/       # another absolute path
-  include: ["*.md", "*.txt", "*.pdf", "*.rst"]  # default if omitted
-  exclude: ["drafts/**", "*.tmp"]
-
-sessions:
-  auto_discover: true          # scan ~/.claude/projects/ automatically
-  # path: ~/custom/sessions/  # explicit override
-```
-
-Without a `sources.yaml`, convention-based discovery is used. The CLI `--path` flag always overrides config.
-
-## Architecture
-
-```
-.knowledge-db/
-├── sources.yaml             # Source configuration (optional)
-├── entries.jsonl            # Curated KB entries
-├── embeddings.npy           # Dense embeddings (384-dim BGE-small)
-├── sparse_index.json        # BM42 sparse vectors
-├── index.json               # ID -> row mapping
-├── sessions/                # Ingested session transcripts
-│   ├── entries.jsonl
-│   ├── embeddings.npy
-│   └── session-registry.json
-└── docs/                    # Ingested documentation chunks
-    ├── entries.jsonl
-    ├── embeddings.npy
-    └── doc-registry.json
-```
-
-### Search Pipeline
-
-```
-Query
-  -> Intent classification (DEBUG/HOWTO/RECALL/EXPLORE)
-  -> Synonym expansion
-  -> Search each source (dense + sparse + RRF per source)
-  -> Weighted RRF fusion across sources
-  -> Cross-encoder reranking
-  -> Results with source labels
-```
-
-## CLI Reference
-
-### `knowlin search`
-
-```bash
-knowlin search "query"                          # Search curated KB
-knowlin search "query" -s kb -s sessions -s docs  # All sources
-knowlin search "query" -f compact               # Compact output
-knowlin search "query" -f json                  # JSON output
-knowlin search "query" -f inject                # LLM injection format
-knowlin search --id <entry-id>                  # Get specific entry
-knowlin search "query" --since 2026-01-01       # Date filter
-knowlin search "query" --type warning           # Type filter
-knowlin search "query" --branch main            # Branch filter
-```
-
-### `knowlin capture`
-
-```bash
-knowlin capture "insight text" --type finding
-knowlin capture "text" --type solution --tags "tag1,tag2" --priority high
-knowlin capture --json-input '{"title":"...", "insight":"...", "type":"warning"}'
-```
-
-Entry types: `finding`, `solution`, `pattern`, `warning`, `decision`, `discovery`
-
-### `knowlin ingest`
-
-```bash
-knowlin ingest sessions              # Ingest Claude Code JSONL transcripts
-knowlin ingest docs --path ./docs/   # Ingest markdown/PDF files
-knowlin ingest all                   # Ingest from all sources
-knowlin ingest all --full            # Force re-processing everything
-```
-
-### `knowlin server`
-
-```bash
-knowlin server start     # Start TCP server (foreground)
-knowlin server stop      # Stop server
-knowlin server status    # Show running servers
-```
-
-### Other
-
-```bash
-knowlin stats            # Database statistics
-knowlin stats --json     # JSON output
-knowlin rebuild          # Rebuild search index from JSONL
-```
+4 tools exposed: `knowlin_search`, `knowlin_get`, `knowlin_stats`, `knowlin_ingest`.
 
 ## Python API
 
 ```python
 from knowlin_mcp import KnowledgeDB, MultiSourceSearch
 
-# Direct DB access
 db = KnowledgeDB("/path/to/project")
 results = db.search("query", limit=5)
-entry_id = db.add({"title": "...", "insight": "...", "type": "finding"})
 
-# Batch operations
-ids = db.batch_add([entry1, entry2, entry3])
-db.remove_entries(["id1", "id2"])
-
-# Sub-stores
-sessions_db = KnowledgeDB("/path/to/project", sub_store="sessions")
-
-# Multi-source search with intent-aware weighting
 ms = MultiSourceSearch("/path/to/project")
 results = ms.search("how to configure auth", sources=["kb", "docs"])
+```
+
+## Storage
+
+```
+.knowledge-db/
+  sources.yaml              # source config (optional)
+  entries.jsonl              # curated KB (source of truth)
+  embeddings.npy             # dense vectors (384-dim)
+  sparse_index.json          # BM42 sparse vectors
+  sessions/                  # ingested session transcripts
+    entries.jsonl, embeddings.npy, session-registry.json
+  docs/                      # ingested documentation chunks
+    entries.jsonl, embeddings.npy, doc-registry.json
 ```
 
 ## Development
 
 ```bash
-git clone <repo>
-cd knowlin-mcp
-python -m venv .venv
-.venv/bin/pip install -e ".[dev,mcp]"
-.venv/bin/pytest tests/ -v
+git clone <repo> && cd knowlin-mcp
+./install.sh
+.venv/bin/pytest tests/ -v           # 266 tests
+.venv/bin/ruff check src/ tests/     # lint
+.venv/bin/black src/ tests/          # format
 ```
 
 ## License

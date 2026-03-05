@@ -56,12 +56,20 @@ def main():
 @click.option(
     "--format", "-f", "fmt",
     type=click.Choice(["compact", "detailed", "inject", "json"]),
-    default="detailed",
+    default="compact",
 )
 @click.option("--limit", "-n", type=int, default=5)
 @click.option("--since", help="Entries from this date (YYYY-MM-DD)")
 @click.option("--until", "until_date", help="Entries up to this date (YYYY-MM-DD)")
-@click.option("--type", "entry_type", help="Filter by type (warning, solution, etc)")
+@click.option(
+    "--type", "entry_type",
+    type=click.Choice(
+        ["finding", "solution", "pattern", "warning", "decision", "discovery",
+         "document", "session"],
+        case_sensitive=False,
+    ),
+    help="Filter by entry type",
+)
 @click.option("--branch", help="Filter by git branch")
 @click.option("--min-score", type=float, default=0.0, help="Minimum relevance score")
 @click.option("--id", "entry_id", help="Get specific entry by ID")
@@ -667,6 +675,66 @@ def sources(do_init, project):
                 "\n[dim]No doc directories found"
                 " (docs/, doc/, INFOS/, documentation/)[/dim]"
             )
+
+
+# =============================================================================
+# init
+# =============================================================================
+
+
+_MCP_JSON_TEMPLATE = """\
+{
+  "mcpServers": {
+    "knowlin-mcp": {
+      "command": "knowlin-mcp"
+    }
+  }
+}
+"""
+
+
+@main.command()
+@click.option("--mcp/--no-mcp", default=True, help="Configure MCP server for Claude Code")
+@click.argument("path", required=False, default=".")
+def init(mcp, path):
+    """Initialize KnowlinMCP in a project directory.
+
+    Creates .knowledge-db/ with sources.yaml template.
+    Optionally writes .mcp.json for Claude Code integration.
+    """
+    root = Path(path).resolve()
+
+    if not root.is_dir():
+        console.print(f"[red]Not a directory: {root}[/red]")
+        raise SystemExit(1)
+
+    kb_dir = root / ".knowledge-db"
+    kb_dir.mkdir(parents=True, exist_ok=True)
+
+    # sources.yaml
+    sources_path = kb_dir / "sources.yaml"
+    if sources_path.exists():
+        console.print("  sources.yaml already exists")
+    else:
+        sources_path.write_text(_SOURCES_TEMPLATE)
+        console.print(f"  Created {sources_path.relative_to(root)}")
+
+    # .mcp.json for Claude Code / MCP clients
+    if mcp:
+        mcp_path = root / ".mcp.json"
+        if mcp_path.exists():
+            console.print("  .mcp.json already exists")
+        else:
+            mcp_path.write_text(_MCP_JSON_TEMPLATE)
+            console.print("  Created .mcp.json (MCP server config)")
+
+    console.print()
+    console.print("[bold]KnowlinMCP initialized.[/bold]")
+    console.print()
+    console.print("Next steps:")
+    console.print("  1. Edit .knowledge-db/sources.yaml to add your doc paths")
+    console.print("  2. Run [bold]knowlin ingest all[/bold] to index your docs")
+    console.print("  3. Run [bold]knowlin search \"your query\"[/bold] to search")
 
 
 if __name__ == "__main__":

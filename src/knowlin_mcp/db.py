@@ -271,6 +271,7 @@ class KnowledgeDB:
     def _build_searchable_text(self, entry: dict[str, Any]) -> str:
         """Build searchable text from entry fields (V3 + legacy)."""
         searchable_parts = [
+            entry.get("context_prefix", ""),
             entry.get("title", ""),
             entry.get("insight", ""),
             " ".join(entry.get("keywords", [])),
@@ -345,10 +346,7 @@ class KnowledgeDB:
             return results[:limit]
 
         try:
-            documents = []
-            for r in results:
-                text = f"{r.get('title', '')} {r.get('insight', r.get('summary', ''))}"
-                documents.append(text)
+            documents = [self._build_searchable_text(r) for r in results]
 
             rerank_scores = list(self.reranker.rerank(query, documents))
 
@@ -599,7 +597,7 @@ class KnowledgeDB:
             return []
 
         has_filters = any([date_from, date_to, entry_type, branch])
-        candidate_limit = limit * (6 if has_filters else 2)
+        candidate_limit = limit * (6 if has_filters else 4)
 
         dense_results = self._dense_search(query, candidate_limit)
         sparse_results = self._sparse_search(query, candidate_limit)

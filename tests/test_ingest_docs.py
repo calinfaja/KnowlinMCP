@@ -102,8 +102,8 @@ class TestChunkByHeadings:
         chunks = ingester._chunk_by_headings(text, "test.md")
         assert len(chunks) >= 1
 
-    def test_contextual_enrichment_prepends_hierarchy(self):
-        """Heading hierarchy is prepended to insight text for better embeddings."""
+    def test_contextual_enrichment_stores_hierarchy_separately(self):
+        """Heading hierarchy is stored as context_prefix, not baked into insight."""
         ingester = DocsIngester.__new__(DocsIngester)
         text = (
             "# Main\n\nIntro text that is long enough to be a chunk.\n\n"
@@ -111,10 +111,11 @@ class TestChunkByHeadings:
             "### Subsub\n\nDeep content that should have full hierarchy prepended for contextual retrieval."
         )
         chunks = ingester._chunk_by_headings(text, "test.md")
-        # Find the deepest chunk - its insight should start with hierarchy
+        # Find the deepest chunk - hierarchy is in context_prefix, content in insight
         deep_chunks = [c for c in chunks if "Deep content" in c["insight"]]
         assert len(deep_chunks) == 1
-        assert deep_chunks[0]["insight"].startswith("Main > Sub > Subsub")
+        assert deep_chunks[0]["context_prefix"] == "Main > Sub > Subsub"
+        assert deep_chunks[0]["insight"].startswith("Deep content")
 
     def test_skips_tiny_chunks(self):
         ingester = DocsIngester.__new__(DocsIngester)

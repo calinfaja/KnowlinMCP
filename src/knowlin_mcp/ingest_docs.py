@@ -125,9 +125,11 @@ class DocsIngester:
         return {}
 
     def _save_registry(self) -> None:
-        """Save the document processing registry."""
+        """Save the document processing registry (atomic write)."""
         self.db_path.mkdir(parents=True, exist_ok=True)
-        self.registry_path.write_text(json.dumps(self._registry, indent=2))
+        tmp = self.registry_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self._registry, indent=2))
+        tmp.rename(self.registry_path)
 
     def _file_hash(self, path: Path) -> str:
         """SHA-256 hash of a file."""
@@ -238,16 +240,17 @@ class DocsIngester:
         if len(title) > 100:
             title = title[:97] + "..."
 
-        # Contextual enrichment: prepend heading hierarchy so embeddings
+        # Truncate content independently of hierarchy prefix
+        insight = content[:MAX_CHUNK_CHARS]
+
+        # Contextual enrichment: store hierarchy as context prefix so embeddings
         # capture document structure (Anthropic contextual retrieval: +20-49%)
-        if hierarchy:
-            insight = f"{hierarchy}\n\n{content}"[:MAX_CHUNK_CHARS]
-        else:
-            insight = content[:MAX_CHUNK_CHARS]
+        context_prefix = hierarchy if hierarchy else ""
 
         return {
             "title": title,
             "insight": insight,
+            "context_prefix": context_prefix,
             "type": "document",
             "priority": "medium",
             "keywords": [],

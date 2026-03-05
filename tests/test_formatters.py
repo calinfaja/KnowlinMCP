@@ -54,19 +54,34 @@ class TestFormatCompact:
         assert "abc-123" in output[:100]
 
     def test_truncates_long_insight(self):
-        results = [{"title": "Test", "type": "finding", "insight": "x" * 200, "date": "2026-01-01", "id": "t1"}]
+        results = [
+            {"title": "Test", "type": "finding", "insight": "x" * 200,
+             "date": "2026-01-01", "id": "t1"},
+        ]
         output = format_compact(results)
         assert "..." in output
 
     def test_empty_results(self):
-        assert format_compact([]) == ""
+        assert format_compact([]) == "No results found."
+
+    def test_includes_source_label(self):
+        results = [
+            {"title": "Test", "type": "finding", "_source": "kb",
+             "date": "2026-01-01", "id": "t1", "score": 0.5},
+        ]
+        output = format_compact(results)
+        assert "kb:finding" in output
+
+    def test_includes_score(self, sample_results):
+        output = format_compact(sample_results)
+        assert "85%" in output
 
 
 class TestFormatDetailed:
     def test_includes_all_metadata(self, sample_results):
         output = format_detailed(sample_results)
         assert "JWT Validation" in output
-        assert "score: 0.85" in output
+        assert "85%" in output
         assert "Type: warning" in output
         assert "Priority: high" in output
         assert "Source: conv:2026-01-15" in output
@@ -77,7 +92,15 @@ class TestFormatDetailed:
         assert "Always validate server-side" in output
 
     def test_empty_results(self):
-        assert format_detailed([]) == ""
+        assert format_detailed([]) == "No results found."
+
+    def test_includes_source_label(self):
+        results = [
+            {"title": "Test", "type": "finding", "_source": "docs",
+             "date": "2026-01-01", "id": "t1", "score": 0.7},
+        ]
+        output = format_detailed(results)
+        assert "[docs]" in output
 
 
 class TestFormatInject:
@@ -85,10 +108,11 @@ class TestFormatInject:
         output = format_inject(sample_results)
         assert "RELEVANT PRIOR KNOWLEDGE" in output
 
-    def test_filters_low_score(self):
+    def test_low_score_still_included(self):
+        """Low-score results are no longer filtered -- reranking handles relevance."""
         results = [{"title": "Low score", "score": 0.1}]
         output = format_inject(results)
-        assert "No highly relevant" in output
+        assert "Low score" in output
 
     def test_empty_results(self):
         output = format_inject([])

@@ -126,9 +126,11 @@ class SessionIngester:
         return {}
 
     def _save_registry(self) -> None:
-        """Save the session processing registry."""
+        """Save the session processing registry (atomic write)."""
         self.db_path.mkdir(parents=True, exist_ok=True)
-        self.registry_path.write_text(json.dumps(self._registry, indent=2))
+        tmp = self.registry_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self._registry, indent=2))
+        tmp.rename(self.registry_path)
 
     def _file_hash(self, path: Path) -> str:
         """SHA-256 hash of a file."""
