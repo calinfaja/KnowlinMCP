@@ -1,4 +1,4 @@
-"""Shared fixtures for kln-knowledge-system tests."""
+"""Shared fixtures for knowlin-mcp tests."""
 
 from __future__ import annotations
 

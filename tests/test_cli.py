@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from kln_knowledge.cli import main
+from knowlin_mcp.cli import main
 
 
 @pytest.fixture
@@ -127,7 +127,7 @@ class TestDoctor:
 class TestStatsCommand:
     """Tests for the multi-source stats command."""
 
-    @patch("kln_knowledge.multi_search.MultiSourceSearch")
+    @patch("knowlin_mcp.multi_search.MultiSourceSearch")
     def test_stats_json_output(self, mock_ms_cls, runner, tmp_path):
         # Create a .knowledge-db so _resolve_project succeeds
         (tmp_path / ".knowledge-db").mkdir()
@@ -146,7 +146,7 @@ class TestStatsCommand:
         assert data["sessions"]["count"] == 5
         assert data["docs"]["available"] is False
 
-    @patch("kln_knowledge.multi_search.MultiSourceSearch")
+    @patch("knowlin_mcp.multi_search.MultiSourceSearch")
     def test_stats_table_output(self, mock_ms_cls, runner, tmp_path):
         (tmp_path / ".knowledge-db").mkdir()
 

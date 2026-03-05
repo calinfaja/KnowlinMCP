@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from kln_knowledge.utils import debug_log
+from knowlin_mcp.utils import debug_log
 
 # BGE-small-en-v1.5 max input is 512 tokens (~2000 chars)
 MAX_CHUNK_CHARS = 1600   # ~400 tokens
@@ -159,7 +159,7 @@ class DocsIngester:
             import pymupdf4llm
             return pymupdf4llm.to_markdown(str(path))
         except ImportError:
-            debug_log("pymupdf4llm not installed. Run: pip install 'kln-knowledge-system[pdf]'")
+            debug_log("pymupdf4llm not installed. Run: pip install 'knowlin-mcp[pdf]'")
             return ""
         except Exception as e:
             debug_log(f"PDF conversion failed for {path}: {e}")
@@ -352,7 +352,7 @@ class DocsIngester:
         if not stale_keys:
             return 0
 
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(self.project_path), sub_store="docs")
         removed = 0
@@ -414,7 +414,7 @@ class DocsIngester:
 
         debug_log(f"Processing {len(to_process)} document files...")
 
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(self.project_path), sub_store="docs")
 

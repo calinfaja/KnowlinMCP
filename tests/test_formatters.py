@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from kln_knowledge.search import (
+from knowlin_mcp.search import (
     FORMATTERS,
     format_compact,
     format_detailed,

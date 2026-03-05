@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kln_knowledge.ingest_sessions import SessionIngester, _VALUE_SIGNALS, _SKIP_PATTERNS
+from knowlin_mcp.ingest_sessions import SessionIngester, _VALUE_SIGNALS, _SKIP_PATTERNS
 
 
 @pytest.fixture
@@ -237,7 +237,7 @@ class TestIngest:
         ingester = SessionIngester(str(tmp_path))
         assert ingester.ingest() == 0
 
-    @patch("kln_knowledge.db.KnowledgeDB")
+    @patch("knowlin_mcp.db.KnowledgeDB")
     def test_ingest_processes_files(self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl):
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["id1"]
@@ -251,7 +251,7 @@ class TestIngest:
         assert count >= 1
         mock_db.batch_add.assert_called_once()
 
-    @patch("kln_knowledge.db.KnowledgeDB")
+    @patch("knowlin_mcp.db.KnowledgeDB")
     def test_incremental_skips_processed(self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl):
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["id1"]
@@ -267,7 +267,7 @@ class TestIngest:
         count = ingester.ingest()
         assert count == 0
 
-    @patch("kln_knowledge.db.KnowledgeDB")
+    @patch("knowlin_mcp.db.KnowledgeDB")
     def test_full_reprocesses_all(self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl):
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["id1"]
@@ -287,7 +287,7 @@ class TestIngest:
 class TestRegistry:
     """Tests for session registry persistence."""
 
-    @patch("kln_knowledge.db.KnowledgeDB")
+    @patch("knowlin_mcp.db.KnowledgeDB")
     def test_registry_saved_after_ingest(self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl):
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["id1"]
@@ -311,7 +311,7 @@ class TestRegistry:
 class TestCleanup:
     """Tests for stale entry cleanup on file deletion/modification."""
 
-    @patch("kln_knowledge.db.KnowledgeDB")
+    @patch("knowlin_mcp.db.KnowledgeDB")
     def test_deleted_session_entries_removed(self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl):
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["id1"]
@@ -338,7 +338,7 @@ class TestCleanup:
         mock_db.remove_entries.assert_called_with(["id1"])
         assert len(ingester2._registry) == 0
 
-    @patch("kln_knowledge.db.KnowledgeDB")
+    @patch("knowlin_mcp.db.KnowledgeDB")
     def test_modified_session_old_entries_replaced(self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl):
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["id1"]
@@ -371,7 +371,7 @@ class TestCleanup:
         # Old entry should be removed
         mock_db.remove_entries.assert_called_with(["id1"])
 
-    @patch("kln_knowledge.db.KnowledgeDB")
+    @patch("knowlin_mcp.db.KnowledgeDB")
     def test_backward_compat_no_entry_ids(self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl):
         """Old registries without entry_ids should not crash."""
         mock_db = MagicMock()

@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kln_knowledge.multi_search import MultiSourceSearch
-from kln_knowledge.query_utils import QueryIntent
+from knowlin_mcp.multi_search import MultiSourceSearch
+from knowlin_mcp.query_utils import QueryIntent
 
 
 @pytest.fixture
@@ -45,7 +45,7 @@ class TestMultiSourceSearch:
         results = ms.search("anything")
         assert results == []
 
-    @patch("kln_knowledge.multi_search.KnowledgeDB")
+    @patch("knowlin_mcp.multi_search.KnowledgeDB")
     def test_search_with_single_source(self, mock_db_cls, tmp_path, mock_kb_entries):
         mock_db = MagicMock()
         mock_db.count.return_value = 2
@@ -59,7 +59,7 @@ class TestMultiSourceSearch:
         assert all("_source" in r for r in results)
         assert all(r["_source"] == "kb" for r in results)
 
-    @patch("kln_knowledge.multi_search.KnowledgeDB")
+    @patch("knowlin_mcp.multi_search.KnowledgeDB")
     def test_search_applies_source_weights(self, mock_db_cls, tmp_path):
         mock_db = MagicMock()
         mock_db.count.return_value = 1
@@ -75,7 +75,7 @@ class TestMultiSourceSearch:
         assert len(results) > 0
         assert "score" in results[0]
 
-    @patch("kln_knowledge.multi_search.KnowledgeDB")
+    @patch("knowlin_mcp.multi_search.KnowledgeDB")
     def test_deduplicates_by_title(self, mock_db_cls, tmp_path):
         mock_db = MagicMock()
         mock_db.count.return_value = 2
@@ -92,7 +92,7 @@ class TestMultiSourceSearch:
         titles = [r["title"] for r in results]
         assert titles.count("Same Title") == 1
 
-    @patch("kln_knowledge.multi_search.KnowledgeDB")
+    @patch("knowlin_mcp.multi_search.KnowledgeDB")
     def test_results_sorted_by_score(self, mock_db_cls, tmp_path):
         mock_db = MagicMock()
         mock_db.count.return_value = 3
@@ -109,7 +109,7 @@ class TestMultiSourceSearch:
         scores = [r.get("score", 0) for r in results]
         assert scores == sorted(scores, reverse=True)
 
-    @patch("kln_knowledge.multi_search.KnowledgeDB")
+    @patch("knowlin_mcp.multi_search.KnowledgeDB")
     def test_respects_limit(self, mock_db_cls, tmp_path):
         mock_db = MagicMock()
         mock_db.count.return_value = 10
@@ -124,7 +124,7 @@ class TestMultiSourceSearch:
 
         assert len(results) <= 3
 
-    @patch("kln_knowledge.multi_search.KnowledgeDB")
+    @patch("knowlin_mcp.multi_search.KnowledgeDB")
     def test_search_meta_contains_intent(self, mock_db_cls, tmp_path):
         mock_db = MagicMock()
         mock_db.count.return_value = 1
@@ -148,7 +148,7 @@ class TestAvailableSources:
         ms = MultiSourceSearch(str(tmp_path))
         assert ms.available_sources() == []
 
-    @patch("kln_knowledge.multi_search.KnowledgeDB")
+    @patch("knowlin_mcp.multi_search.KnowledgeDB")
     def test_lists_available_sources(self, mock_db_cls, tmp_path):
         mock_db = MagicMock()
         mock_db.count.return_value = 5

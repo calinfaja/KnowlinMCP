@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kln_knowledge.ingest_docs import (
+from knowlin_mcp.ingest_docs import (
     DocsIngester,
     MAX_CHUNK_CHARS,
     MIN_CHUNK_CHARS,
@@ -333,7 +333,7 @@ class TestReadFile:
 class TestIngest:
     """Tests for the main ingest pipeline."""
 
-    @patch("kln_knowledge.db.KnowledgeDB")
+    @patch("knowlin_mcp.db.KnowledgeDB")
     def test_ingest_processes_docs(self, mock_db_cls, tmp_path, docs_dir, sample_markdown):
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["id1", "id2"]
@@ -348,7 +348,7 @@ class TestIngest:
         assert count >= 1
         mock_db.batch_add.assert_called_once()
 
-    @patch("kln_knowledge.db.KnowledgeDB")
+    @patch("knowlin_mcp.db.KnowledgeDB")
     def test_incremental_skips_unchanged(self, mock_db_cls, tmp_path, docs_dir, sample_markdown):
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["id1"]
@@ -365,7 +365,7 @@ class TestIngest:
         count = ingester.ingest()
         assert count == 0
 
-    @patch("kln_knowledge.db.KnowledgeDB")
+    @patch("knowlin_mcp.db.KnowledgeDB")
     def test_full_reprocesses_changed_content(self, mock_db_cls, tmp_path, docs_dir, sample_markdown):
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["id1"]
@@ -397,7 +397,7 @@ class TestIngest:
 class TestRegistry:
     """Tests for document registry persistence."""
 
-    @patch("kln_knowledge.db.KnowledgeDB")
+    @patch("knowlin_mcp.db.KnowledgeDB")
     def test_registry_saved_after_ingest(self, mock_db_cls, tmp_path, docs_dir, sample_markdown):
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["id1"]
@@ -429,7 +429,7 @@ class TestRegistry:
 class TestCleanup:
     """Tests for stale entry cleanup on file deletion/modification."""
 
-    @patch("kln_knowledge.db.KnowledgeDB")
+    @patch("knowlin_mcp.db.KnowledgeDB")
     def test_deleted_file_entries_removed(self, mock_db_cls, tmp_path, docs_dir):
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["id1"]
@@ -465,7 +465,7 @@ class TestCleanup:
         # remove_entries should have been called with the old IDs
         mock_db.remove_entries.assert_called_with(["id1"])
 
-    @patch("kln_knowledge.db.KnowledgeDB")
+    @patch("knowlin_mcp.db.KnowledgeDB")
     def test_modified_file_old_entries_replaced(self, mock_db_cls, tmp_path, docs_dir):
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["id1"]
@@ -499,7 +499,7 @@ class TestCleanup:
         for entry in registry.values():
             assert entry["entry_ids"] == ["id2"]
 
-    @patch("kln_knowledge.db.KnowledgeDB")
+    @patch("knowlin_mcp.db.KnowledgeDB")
     def test_entry_ids_stored_in_registry(self, mock_db_cls, tmp_path, docs_dir):
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["abc", "def", "ghi"]
@@ -524,7 +524,7 @@ class TestCleanup:
             assert "entry_ids" in entry
             assert len(entry["entry_ids"]) > 0
 
-    @patch("kln_knowledge.db.KnowledgeDB")
+    @patch("knowlin_mcp.db.KnowledgeDB")
     def test_backward_compat_no_entry_ids(self, mock_db_cls, tmp_path, docs_dir):
         """Old registries without entry_ids should not crash."""
         mock_db = MagicMock()
@@ -679,7 +679,7 @@ class TestSessionSourcesConfig:
         project.mkdir()
         (project / ".knowledge-db").mkdir()
 
-        from kln_knowledge.ingest_sessions import SessionIngester
+        from knowlin_mcp.ingest_sessions import SessionIngester
         ingester = SessionIngester(str(project))
         # auto_discover is True by default, sessions_dir may be None
         # if no claude projects dir exists -- that's fine
@@ -696,7 +696,7 @@ class TestSessionSourcesConfig:
         config = db_dir / "sources.yaml"
         config.write_text(f"sessions:\n  path: {custom_sessions}\n")
 
-        from kln_knowledge.ingest_sessions import SessionIngester
+        from knowlin_mcp.ingest_sessions import SessionIngester
         ingester = SessionIngester(str(project))
         assert ingester.sessions_dir == custom_sessions.resolve()
 
@@ -712,7 +712,7 @@ class TestSessionSourcesConfig:
         override = tmp_path / "override-sessions"
         override.mkdir()
 
-        from kln_knowledge.ingest_sessions import SessionIngester
+        from knowlin_mcp.ingest_sessions import SessionIngester
         ingester = SessionIngester(str(project), sessions_dir=str(override))
         assert ingester.sessions_dir == override
 
@@ -725,6 +725,6 @@ class TestSessionSourcesConfig:
         config = db_dir / "sources.yaml"
         config.write_text("sessions:\n  auto_discover: false\n")
 
-        from kln_knowledge.ingest_sessions import SessionIngester
+        from knowlin_mcp.ingest_sessions import SessionIngester
         ingester = SessionIngester(str(project))
         assert ingester.sessions_dir is None

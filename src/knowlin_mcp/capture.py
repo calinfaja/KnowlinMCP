@@ -11,8 +11,8 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from kln_knowledge.platform import HOST, get_kb_port_file
-from kln_knowledge.utils import debug_log, infer_type
+from knowlin_mcp.platform import HOST, get_kb_port_file
+from knowlin_mcp.utils import debug_log, infer_type
 
 
 def _get_current_branch() -> str:
@@ -191,7 +191,7 @@ def save_entry(entry: dict, knowledge_dir: Path) -> bool:
 
     # Method 2: Direct KnowledgeDB
     try:
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(project_path)
         db.add(entry)

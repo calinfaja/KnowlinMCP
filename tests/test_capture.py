@@ -8,7 +8,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from kln_knowledge.capture import (
+from knowlin_mcp.capture import (
     create_entry,
     create_entry_from_json,
     log_to_timeline,
@@ -108,9 +108,9 @@ class TestSaveEntry:
         entry = create_entry("Test fallback save entry content")
 
         # Mock server and DB to fail
-        with patch("kln_knowledge.capture.send_entry_to_server", return_value=False), \
-             patch("kln_knowledge.db.KnowledgeDB.add", side_effect=Exception("no DB")), \
-             patch("kln_knowledge.capture._notify_server_reload"):
+        with patch("knowlin_mcp.capture.send_entry_to_server", return_value=False), \
+             patch("knowlin_mcp.db.KnowledgeDB.add", side_effect=Exception("no DB")), \
+             patch("knowlin_mcp.capture._notify_server_reload"):
             result = save_entry(entry, kb_dir)
 
         assert result is True

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from kln_knowledge.db import KnowledgeDB
+from knowlin_mcp.db import KnowledgeDB
 
 # Golden corpus: diverse topics for testing retrieval quality
 GOLDEN_CORPUS = [

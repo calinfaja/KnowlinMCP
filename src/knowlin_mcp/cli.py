@@ -1,6 +1,6 @@
-"""KLN Knowledge System CLI.
+"""KnowlinMCP CLI.
 
-Entry point: kln-kb
+Entry point: knowlin
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from kln_knowledge.platform import (
+from knowlin_mcp.platform import (
     KB_DIR_NAME,
     cleanup_stale_files,
     find_project_root,
@@ -22,8 +22,8 @@ from kln_knowledge.platform import (
     kill_process_tree,
     read_pid_file,
 )
-from kln_knowledge.search import FORMATTERS, format_single_entry
-from kln_knowledge.utils import is_server_running
+from knowlin_mcp.search import FORMATTERS, format_single_entry
+from knowlin_mcp.utils import is_server_running
 
 console = Console()
 
@@ -39,9 +39,9 @@ def _resolve_project(project: str | None = None) -> Path:
 
 
 @click.group()
-@click.version_option(package_name="kln-knowledge-system")
+@click.version_option(package_name="knowlin-mcp")
 def main():
-    """KLN Knowledge System - Hybrid semantic knowledge database."""
+    """KnowlinMCP -- Hybrid semantic knowledge database."""
     pass
 
 
@@ -77,7 +77,7 @@ def search(
 
     # Detail retrieval mode (single entry by ID)
     if entry_id:
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
         try:
             db = KnowledgeDB(str(root))
         except Exception as e:
@@ -110,7 +110,7 @@ def search(
         raise SystemExit(1)
 
     # Use MultiSourceSearch for unified weighted RRF search
-    from kln_knowledge.multi_search import MultiSourceSearch
+    from knowlin_mcp.multi_search import MultiSourceSearch
     ms = MultiSourceSearch(str(root))
 
     all_results = ms.search(
@@ -161,7 +161,7 @@ def capture(content, entry_type, tags, priority, url, json_input, json_output, p
         console.print("[red]Either content or --json-input is required[/red]")
         raise SystemExit(1)
 
-    from kln_knowledge.capture import (
+    from knowlin_mcp.capture import (
         create_entry,
         create_entry_from_json,
         log_to_timeline,
@@ -234,7 +234,7 @@ def server_start(project):
         return
 
     # Start inline (foreground)
-    from kln_knowledge.server import KnowledgeServer
+    from knowlin_mcp.server import KnowledgeServer
     srv = KnowledgeServer(str(root))
     srv.start()
 
@@ -263,7 +263,7 @@ def server_stop(project):
 @click.option("--project", "-p", help="Project path")
 def server_status(project):
     """Show server status."""
-    from kln_knowledge.server import list_running_servers, send_command
+    from knowlin_mcp.server import list_running_servers, send_command
 
     if not project:
         servers = list_running_servers()
@@ -308,7 +308,7 @@ def server_status(project):
 @click.option("--project", "-p", help="Project path")
 def stats(json_output, project):
     """Show database statistics for all sources."""
-    from kln_knowledge.multi_search import MultiSourceSearch
+    from knowlin_mcp.multi_search import MultiSourceSearch
 
     root = _resolve_project(project)
 
@@ -360,7 +360,7 @@ def stats(json_output, project):
 @click.option("--project", "-p", help="Project path")
 def rebuild(dense_only, batch_size, project):
     """Rebuild the search index from JSONL backup."""
-    from kln_knowledge.db import KnowledgeDB
+    from knowlin_mcp.db import KnowledgeDB
 
     root = _resolve_project(project)
 
@@ -438,7 +438,7 @@ def doctor(fix, project):
         if not emb.exists():
             warn(f"{store_name}: entries.jsonl ({jsonl_count}) but no embeddings.npy")
             if fix:
-                from kln_knowledge.db import KnowledgeDB
+                from knowlin_mcp.db import KnowledgeDB
                 console.print(f"    [cyan]Rebuilding {store_name} index...[/cyan]")
                 db = KnowledgeDB(str(root), sub_store=sub_store)
                 db.rebuild_index()
@@ -465,7 +465,7 @@ def doctor(fix, project):
             if orphaned > 0:
                 warn(f"{store_name}: {orphaned} orphaned embeddings (run rebuild to compact)")
                 if fix:
-                    from kln_knowledge.db import KnowledgeDB
+                    from knowlin_mcp.db import KnowledgeDB
                     console.print(f"    [cyan]Compacting {store_name}...[/cyan]")
                     db = KnowledgeDB(str(root), sub_store=sub_store)
                     db.rebuild_index()
@@ -478,7 +478,7 @@ def doctor(fix, project):
                 f"JSONL={jsonl_count}, embeddings={emb_count}, index={idx_count}"
             )
             if fix:
-                from kln_knowledge.db import KnowledgeDB
+                from knowlin_mcp.db import KnowledgeDB
                 console.print(f"    [cyan]Rebuilding {store_name}...[/cyan]")
                 db = KnowledgeDB(str(root), sub_store=sub_store)
                 db.rebuild_index()
@@ -546,7 +546,7 @@ def ingest_sessions(full, project):
     """Ingest Claude Code session transcripts."""
     root = _resolve_project(project)
 
-    from kln_knowledge.ingest_sessions import SessionIngester
+    from knowlin_mcp.ingest_sessions import SessionIngester
 
     ingester = SessionIngester(str(root))
     count = ingester.ingest(full=full)
@@ -561,7 +561,7 @@ def ingest_docs(docs_path, full, project):
     """Ingest markdown/PDF documentation."""
     root = _resolve_project(project)
 
-    from kln_knowledge.ingest_docs import DocsIngester
+    from knowlin_mcp.ingest_docs import DocsIngester
 
     ingester = DocsIngester(str(root), docs_path=docs_path)
     count = ingester.ingest(full=full)
@@ -576,7 +576,7 @@ def ingest_all(full, project):
     root = _resolve_project(project)
     total = 0
 
-    from kln_knowledge.ingest_sessions import SessionIngester
+    from knowlin_mcp.ingest_sessions import SessionIngester
 
     try:
         ingester = SessionIngester(str(root))
@@ -586,7 +586,7 @@ def ingest_all(full, project):
     except Exception as e:
         console.print(f"[yellow]Sessions skipped: {e}[/yellow]")
 
-    from kln_knowledge.ingest_docs import DocsIngester
+    from knowlin_mcp.ingest_docs import DocsIngester
 
     try:
         ingester = DocsIngester(str(root))
@@ -605,7 +605,7 @@ def ingest_all(full, project):
 
 
 _SOURCES_TEMPLATE = """\
-# KLN Knowledge System - Source Configuration
+# KnowlinMCP - Source Configuration
 # Declares which documents and sessions to index.
 # Paths are relative to the project root unless absolute.
 
@@ -648,10 +648,10 @@ def sources(do_init, project):
         click.echo(config_path.read_text())
     else:
         console.print("[dim]No sources.yaml found (using convention-based discovery)[/dim]")
-        console.print("Run [bold]kln-kb sources --init[/bold] to create one.")
+        console.print("Run [bold]knowlin sources --init[/bold] to create one.")
 
         # Show what convention-based discovery finds
-        from kln_knowledge.ingest_docs import DocsIngester
+        from knowlin_mcp.ingest_docs import DocsIngester
         ingester = DocsIngester.__new__(DocsIngester)
         ingester.project_path = root
         ingester._sources_config = None

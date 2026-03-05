@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from kln_knowledge.ingest_docs import DocsIngester
+from knowlin_mcp.ingest_docs import DocsIngester
 
 
 def _create_test_pdf(path: Path, text: str) -> bool:
@@ -47,7 +47,7 @@ def docs_with_pdf(tmp_path):
         "## Prerequisites\n\n"
         "You need Python 3.9 or later and pip installed on your system.\n\n"
         "## Steps\n\n"
-        "Run pip install kln-knowledge-system to install the package.\n"
+        "Run pip install knowlin-mcp to install the package.\n"
     )
 
     return project

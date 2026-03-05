@@ -24,8 +24,8 @@ from typing import Any, Optional
 
 import numpy as np
 
-from kln_knowledge.platform import find_project_root
-from kln_knowledge.utils import debug_log, migrate_entry
+from knowlin_mcp.platform import find_project_root
+from knowlin_mcp.utils import debug_log, migrate_entry
 
 # Fastembed imports
 try:

@@ -16,7 +16,7 @@ import threading
 import time
 from pathlib import Path
 
-from kln_knowledge.platform import (
+from knowlin_mcp.platform import (
     HOST,
     find_project_root,
     get_kb_pid_file,
@@ -129,7 +129,7 @@ class KnowledgeServer:
         print(f"Loading index from {db_path}...")
         start = time.time()
 
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         self.db = KnowledgeDB(str(self.project_root))
         self.load_time = time.time() - start
@@ -190,7 +190,7 @@ class KnowledgeServer:
 
                 # Multi-source search
                 if sources and len(sources) > 1:
-                    from kln_knowledge.multi_search import MultiSourceSearch
+                    from knowlin_mcp.multi_search import MultiSourceSearch
                     ms = MultiSourceSearch(str(self.project_root))
                     results = ms.search(
                         query, sources=sources, limit=limit,
@@ -339,11 +339,11 @@ class KnowledgeServer:
                 try:
                     counts = {}
                     if source in ("sessions", "all"):
-                        from kln_knowledge.ingest_sessions import SessionIngester
+                        from knowlin_mcp.ingest_sessions import SessionIngester
                         si = SessionIngester(str(self.project_root))
                         counts["sessions"] = si.ingest(full=full)
                     if source in ("docs", "all"):
-                        from kln_knowledge.ingest_docs import DocsIngester
+                        from knowlin_mcp.ingest_docs import DocsIngester
                         di = DocsIngester(str(self.project_root))
                         counts["docs"] = di.ingest(full=full)
                     total = sum(counts.values())

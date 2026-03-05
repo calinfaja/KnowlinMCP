@@ -1,9 +1,10 @@
-# kln-knowledge-system
+# KnowlinMCP
 
-Hybrid semantic knowledge database with multi-source search. Captures, indexes, and retrieves project knowledge using dense embeddings (BGE-small-en-v1.5), sparse matching (BM42), and cross-encoder reranking.
+Hybrid semantic knowledge database with MCP server and multi-source search. Captures, indexes, and retrieves project knowledge using dense embeddings (BGE-small-en-v1.5), sparse matching (BM42), and cross-encoder reranking.
 
 ## Features
 
+- **MCP server**: Expose knowledge search to Claude, Gemini, Codex, Cursor, VS Code, and other MCP clients
 - **Hybrid search**: Dense + sparse + RRF fusion + cross-encoder reranking (~30ms via TCP server)
 - **Multi-source**: Search across curated KB, session transcripts, and documentation
 - **Intent-aware**: Query classification adjusts source weights (debug queries favor sessions, howto queries favor docs)
@@ -13,35 +14,102 @@ Hybrid semantic knowledge database with multi-source search. Captures, indexes, 
 ## Installation
 
 ```bash
-pip install kln-knowledge-system
+pip install knowlin-mcp
+
+# With MCP server support
+pip install "knowlin-mcp[mcp]"
 
 # With PDF support
-pip install "kln-knowledge-system[pdf]"
+pip install "knowlin-mcp[pdf]"
+```
+
+## MCP Server
+
+KnowlinMCP exposes 4 tools to any MCP client via stdio transport:
+
+| Tool | Description |
+|------|-------------|
+| `knowlin_search` | Hybrid semantic + keyword search with source/date/type filtering |
+| `knowlin_get` | Retrieve full entry details by ID |
+| `knowlin_stats` | Database statistics (entry counts, sizes, health) |
+| `knowlin_ingest` | Trigger docs/sessions ingestion |
+
+### Client Configuration
+
+**Claude Code** (`.mcp.json` at project root):
+```json
+{
+  "mcpServers": {
+    "knowlin-mcp": {
+      "command": "knowlin-mcp"
+    }
+  }
+}
+```
+
+**Gemini CLI** (`~/.gemini/settings.json`):
+```json
+{
+  "mcpServers": {
+    "knowlin-mcp": {
+      "command": "knowlin-mcp"
+    }
+  }
+}
+```
+
+**OpenAI Codex CLI** (`~/.codex/config.toml`):
+```toml
+[mcp_servers.knowlin-mcp]
+command = "knowlin-mcp"
+```
+
+**Cursor** (`.cursor/mcp.json`):
+```json
+{
+  "mcpServers": {
+    "knowlin-mcp": {
+      "command": "knowlin-mcp"
+    }
+  }
+}
+```
+
+**VS Code / Copilot** (`.vscode/mcp.json`):
+```json
+{
+  "servers": {
+    "knowlin-mcp": {
+      "type": "stdio",
+      "command": "knowlin-mcp"
+    }
+  }
+}
 ```
 
 ## Quick Start
 
 ```bash
 # Capture knowledge
-kln-kb capture "JWT tokens must be validated server-side" --type warning --tags "auth,security"
+knowlin capture "JWT tokens must be validated server-side" --type warning --tags "auth,security"
 
 # Search
-kln-kb search "authentication best practices"
+knowlin search "authentication best practices"
 
 # Search across all sources
-kln-kb search "how to fix timeout" --source kb --source sessions --source docs
+knowlin search "how to fix timeout" --source kb --source sessions --source docs
 
 # Ingest documentation
-kln-kb ingest docs --path ./docs/
+knowlin ingest docs --path ./docs/
 
 # Ingest Claude Code sessions
-kln-kb ingest sessions
+knowlin ingest sessions
 
 # Start the TCP server for fast searches
-kln-kb server start
+knowlin server start
 
 # Show statistics
-kln-kb stats
+knowlin stats
 ```
 
 ## Source Configuration
@@ -51,8 +119,8 @@ By default, the system auto-discovers docs from convention directories (`docs/`,
 For explicit control, create a sources config:
 
 ```bash
-kln-kb sources --init    # Creates .knowledge-db/sources.yaml template
-kln-kb sources           # Show current configuration
+knowlin sources --init    # Creates .knowledge-db/sources.yaml template
+knowlin sources           # Show current configuration
 ```
 
 ```yaml
@@ -105,59 +173,59 @@ Query
 
 ## CLI Reference
 
-### `kln-kb search`
+### `knowlin search`
 
 ```bash
-kln-kb search "query"                          # Search curated KB
-kln-kb search "query" -s kb -s sessions -s docs  # All sources
-kln-kb search "query" -f compact               # Compact output
-kln-kb search "query" -f json                  # JSON output
-kln-kb search "query" -f inject                # Claude Code injection format
-kln-kb search --id <entry-id>                  # Get specific entry
-kln-kb search "query" --since 2026-01-01       # Date filter
-kln-kb search "query" --type warning           # Type filter
-kln-kb search "query" --branch main            # Branch filter
+knowlin search "query"                          # Search curated KB
+knowlin search "query" -s kb -s sessions -s docs  # All sources
+knowlin search "query" -f compact               # Compact output
+knowlin search "query" -f json                  # JSON output
+knowlin search "query" -f inject                # LLM injection format
+knowlin search --id <entry-id>                  # Get specific entry
+knowlin search "query" --since 2026-01-01       # Date filter
+knowlin search "query" --type warning           # Type filter
+knowlin search "query" --branch main            # Branch filter
 ```
 
-### `kln-kb capture`
+### `knowlin capture`
 
 ```bash
-kln-kb capture "insight text" --type finding
-kln-kb capture "text" --type solution --tags "tag1,tag2" --priority high
-kln-kb capture --json-input '{"title":"...", "insight":"...", "type":"warning"}'
+knowlin capture "insight text" --type finding
+knowlin capture "text" --type solution --tags "tag1,tag2" --priority high
+knowlin capture --json-input '{"title":"...", "insight":"...", "type":"warning"}'
 ```
 
 Entry types: `finding`, `solution`, `pattern`, `warning`, `decision`, `discovery`
 
-### `kln-kb ingest`
+### `knowlin ingest`
 
 ```bash
-kln-kb ingest sessions              # Ingest Claude Code JSONL transcripts
-kln-kb ingest docs --path ./docs/   # Ingest markdown/PDF files
-kln-kb ingest all                   # Ingest from all sources
-kln-kb ingest all --full            # Force re-processing everything
+knowlin ingest sessions              # Ingest Claude Code JSONL transcripts
+knowlin ingest docs --path ./docs/   # Ingest markdown/PDF files
+knowlin ingest all                   # Ingest from all sources
+knowlin ingest all --full            # Force re-processing everything
 ```
 
-### `kln-kb server`
+### `knowlin server`
 
 ```bash
-kln-kb server start     # Start TCP server (foreground)
-kln-kb server stop      # Stop server
-kln-kb server status    # Show running servers
+knowlin server start     # Start TCP server (foreground)
+knowlin server stop      # Stop server
+knowlin server status    # Show running servers
 ```
 
 ### Other
 
 ```bash
-kln-kb stats            # Database statistics
-kln-kb stats --json     # JSON output
-kln-kb rebuild          # Rebuild search index from JSONL
+knowlin stats            # Database statistics
+knowlin stats --json     # JSON output
+knowlin rebuild          # Rebuild search index from JSONL
 ```
 
 ## Python API
 
 ```python
-from kln_knowledge import KnowledgeDB, MultiSourceSearch
+from knowlin_mcp import KnowledgeDB, MultiSourceSearch
 
 # Direct DB access
 db = KnowledgeDB("/path/to/project")
@@ -180,9 +248,9 @@ results = ms.search("how to configure auth", sources=["kb", "docs"])
 
 ```bash
 git clone <repo>
-cd kln-knowledge-system
+cd knowlin-mcp
 python -m venv .venv
-.venv/bin/pip install -e ".[dev]"
+.venv/bin/pip install -e ".[dev,mcp]"
 .venv/bin/pytest tests/ -v
 ```
 

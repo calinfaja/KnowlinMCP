@@ -1,0 +1,249 @@
+"""KnowlinMCP -- MCP server exposing hybrid knowledge search to any MCP client."""
+
+from __future__ import annotations
+
+from mcp.server.fastmcp import FastMCP
+
+from knowlin_mcp.platform import find_project_root
+
+mcp = FastMCP(
+    "knowlin-mcp",
+    instructions=(
+        "Knowledge database with hybrid semantic search. "
+        "Use knowlin_search to find prior knowledge, knowlin_get for full entry details, "
+        "knowlin_stats for database overview, knowlin_ingest to index new documents/sessions."
+    ),
+)
+
+_project_root: str | None = None
+
+
+def _get_project_root() -> str:
+    """Resolve and cache the project root path."""
+    global _project_root
+    if _project_root is None:
+        root = find_project_root()
+        if root is None:
+            raise RuntimeError(
+                "No project root found. Ensure .git or .knowledge-db exists "
+                "in a parent directory, or set CLAUDE_PROJECT_DIR."
+            )
+        _project_root = str(root)
+    return _project_root
+
+
+def _parse_sources(sources: str) -> list[str]:
+    """Parse comma-separated source string into list."""
+    if not sources or sources.strip().lower() == "all":
+        return ["kb", "sessions", "docs"]
+    return [s.strip().lower() for s in sources.split(",") if s.strip()]
+
+
+@mcp.tool()
+def knowlin_search(
+    query: str,
+    limit: int = 5,
+    sources: str = "all",
+    since: str = "",
+    until: str = "",
+    type: str = "",
+) -> str:
+    """Search the knowledge database with hybrid semantic + keyword matching.
+
+    Args:
+        query: Natural language search query
+        limit: Maximum results (1-20, default 5)
+        sources: Comma-separated sources: kb, sessions, docs, or "all" (default)
+        since: Filter results after this date (YYYY-MM-DD)
+        until: Filter results before this date (YYYY-MM-DD)
+        type: Filter by entry type (finding, solution, pattern, warning, decision, discovery)
+    """
+    try:
+        from knowlin_mcp.multi_search import MultiSourceSearch
+
+        root = _get_project_root()
+        limit = max(1, min(20, limit))
+        source_list = _parse_sources(sources)
+        ms = MultiSourceSearch(root)
+
+        results = ms.search(
+            query,
+            sources=source_list,
+            limit=limit,
+            date_from=since or None,
+            date_to=until or None,
+            entry_type=type or None,
+        )
+
+        if not results:
+            return f"No results found for: {query}"
+
+        lines = [f"Found {len(results)} result(s) from {', '.join(source_list)}:", ""]
+
+        for r in results:
+            title = r.get("title", "Untitled")
+            score = r.get("score", 0)
+            source = r.get("_source", "?")
+            etype = r.get("type", "")
+            date = (r.get("date") or r.get("found_date") or "")[:10]
+            entry_id = r.get("id", "")
+            insight = r.get("insight") or r.get("summary") or ""
+            if len(insight) > 300:
+                insight = insight[:297] + "..."
+
+            lines.append(f"### {title} ({score:.0%})")
+            meta = f"[{source}]"
+            if etype:
+                meta += f" {etype}"
+            if date:
+                meta += f" | {date}"
+            lines.append(meta)
+            if insight:
+                lines.append(insight)
+            if entry_id:
+                lines.append(f"ID: {entry_id}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"Search error: {e}"
+
+
+@mcp.tool()
+def knowlin_get(entry_id: str) -> str:
+    """Retrieve the full details of a knowledge entry by its ID.
+
+    Args:
+        entry_id: The entry ID (returned by knowlin_search)
+    """
+    try:
+        from knowlin_mcp.db import KnowledgeDB
+
+        root = _get_project_root()
+
+        # Try all sub-stores
+        for sub in (None, "sessions", "docs"):
+            db = KnowledgeDB(root, sub_store=sub)
+            entry = db.get(entry_id)
+            if entry:
+                return _format_full_entry(entry, sub or "kb")
+
+        return f"Entry not found: {entry_id}"
+
+    except Exception as e:
+        return f"Get error: {e}"
+
+
+def _format_full_entry(entry: dict, source: str) -> str:
+    """Format a full entry as Markdown."""
+    lines = [f"# {entry.get('title', 'Untitled')}", ""]
+
+    meta_parts = [f"Source: {source}"]
+    if entry.get("type"):
+        meta_parts.append(f"Type: {entry['type']}")
+    date = (entry.get("date") or entry.get("found_date") or "")[:10]
+    if date:
+        meta_parts.append(f"Date: {date}")
+    if entry.get("id"):
+        meta_parts.append(f"ID: {entry['id']}")
+    lines.append(" | ".join(meta_parts))
+    lines.append("")
+
+    for field, label in [
+        ("insight", "Insight"),
+        ("summary", "Summary"),
+        ("problem_solved", "Problem"),
+        ("what_worked", "Solution"),
+        ("why_it_matters", "Why it matters"),
+        ("context", "Context"),
+        ("content", "Content"),
+    ]:
+        val = entry.get(field)
+        if val:
+            lines.append(f"**{label}:** {val}")
+            lines.append("")
+
+    kw = entry.get("keywords") or entry.get("tags")
+    if kw:
+        lines.append(f"**Keywords:** {', '.join(kw)}")
+
+    if entry.get("url"):
+        lines.append(f"**URL:** {entry['url']}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def knowlin_stats() -> str:
+    """Show knowledge database statistics (entry counts, sizes, health)."""
+    try:
+        from knowlin_mcp.multi_search import MultiSourceSearch
+
+        root = _get_project_root()
+        ms = MultiSourceSearch(root)
+        all_stats = ms.stats()
+
+        lines = ["# Knowledge DB Stats", ""]
+        lines.append("| Source | Entries | Size | Last Updated | Status |")
+        lines.append("|--------|---------|------|--------------|--------|")
+
+        total = 0
+        for source in ("kb", "sessions", "docs"):
+            s = all_stats.get(source, {})
+            count = s.get("count", 0)
+            total += count
+            size = s.get("size_human", "0 KB")
+            updated = (s.get("last_updated") or "never")[:10]
+            status = "ok" if s.get("available") else "empty"
+            lines.append(f"| {source} | {count} | {size} | {updated} | {status} |")
+
+        lines.append(f"\n**Total entries:** {total}")
+        lines.append(f"**Project:** {root}")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"Stats error: {e}"
+
+
+@mcp.tool()
+def knowlin_ingest(source: str = "all") -> str:
+    """Ingest documents and/or session transcripts into the knowledge database.
+
+    Args:
+        source: What to ingest: "docs", "sessions", or "all" (default)
+    """
+    try:
+        root = _get_project_root()
+        source = source.strip().lower()
+        if source not in ("docs", "sessions", "all"):
+            return f"Invalid source: {source}. Use 'docs', 'sessions', or 'all'."
+
+        results = []
+
+        if source in ("docs", "all"):
+            from knowlin_mcp.ingest_docs import DocsIngester
+
+            count = DocsIngester(root).ingest()
+            results.append(f"Docs: {count} entries ingested")
+
+        if source in ("sessions", "all"):
+            from knowlin_mcp.ingest_sessions import SessionIngester
+
+            count = SessionIngester(root).ingest()
+            results.append(f"Sessions: {count} entries ingested")
+
+        return "\n".join(results)
+
+    except Exception as e:
+        return f"Ingest error: {e}"
+
+
+def main():
+    """Entry point for knowlin-mcp command."""
+    mcp.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()

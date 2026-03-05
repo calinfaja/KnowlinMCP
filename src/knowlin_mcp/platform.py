@@ -1,4 +1,4 @@
-"""Cross-platform utilities for KLN Knowledge System.
+"""Cross-platform utilities for KnowlinMCP.
 
 Provides cross-platform path handling and process management
 using platformdirs and psutil.
@@ -35,30 +35,29 @@ HOST = "127.0.0.1"
 
 
 def get_config_dir() -> Path:
-    """Get the KLN configuration directory (platform-specific)."""
-    return Path(platformdirs.user_config_dir("kln-knowledge", ensure_exists=True))
+    """Get the KnowlinMCP configuration directory (platform-specific)."""
+    return Path(platformdirs.user_config_dir("knowlin-mcp", ensure_exists=True))
 
 
 def get_cache_dir() -> Path:
-    """Get the KLN cache directory (platform-specific)."""
-    return Path(platformdirs.user_cache_dir("kln-knowledge", ensure_exists=True))
+    """Get the KnowlinMCP cache directory (platform-specific)."""
+    return Path(platformdirs.user_cache_dir("knowlin-mcp", ensure_exists=True))
 
 
 def get_runtime_dir() -> Path:
-    """Get the KLN runtime directory for PIDs and port files.
+    """Get the KnowlinMCP runtime directory for PIDs and port files.
 
-    Returns /tmp/klean-{username} (Linux/macOS) or %TEMP%/klean-{username} (Windows).
-    Uses 'klean' prefix for backward compatibility with existing K-LEAN installations.
+    Returns /tmp/knowlin-{username} (Linux/macOS) or %TEMP%/knowlin-{username} (Windows).
     """
     username = getpass.getuser()
-    runtime_dir = Path(tempfile.gettempdir()) / f"klean-{username}"
+    runtime_dir = Path(tempfile.gettempdir()) / f"knowlin-{username}"
     runtime_dir.mkdir(parents=True, exist_ok=True)
     return runtime_dir
 
 
 def get_kb_port() -> int:
     """Get the knowledge server port from environment or default (14000)."""
-    return int(os.environ.get("KLEAN_KB_PORT", str(DEFAULT_KB_PORT)))
+    return int(os.environ.get("KNOWLIN_KB_PORT", str(DEFAULT_KB_PORT)))
 
 
 def get_project_hash(project_path: Path) -> str:

@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from kln_knowledge.utils import debug_log
+from knowlin_mcp.utils import debug_log
 
 # Minimum content length worth indexing (skip trivial responses)
 MIN_CONTENT_LENGTH = 100
@@ -73,7 +73,7 @@ class SessionIngester:
         self.registry_path = self.db_path / "session-registry.json"
 
         # Load sources config
-        from kln_knowledge.ingest_docs import _resolve_paths, load_sources_config
+        from knowlin_mcp.ingest_docs import _resolve_paths, load_sources_config
         sources_config = load_sources_config(self.db_path)
         sessions_config = (sources_config or {}).get("sessions", {})
 
@@ -286,7 +286,7 @@ class SessionIngester:
         if not stale_keys:
             return 0
 
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(self.project_path), sub_store="sessions")
         removed = 0
@@ -353,7 +353,7 @@ class SessionIngester:
 
         debug_log(f"Processing {len(to_process)} session files...")
 
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(self.project_path), sub_store="sessions")
 

@@ -1,4 +1,4 @@
-"""Tests for kln_knowledge.db module.
+"""Tests for knowlin_mcp.db module.
 
 Tests the hybrid search system with RRF fusion:
 - Dense search (semantic similarity via BGE)
@@ -29,34 +29,34 @@ class TestRRFScore:
     """Tests for RRF (Reciprocal Rank Fusion) scoring."""
 
     def test_rrf_single_rank(self):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         score = KnowledgeDB.rrf_score([1], k=60)
         assert abs(score - (1.0 / 61)) < 0.0001
 
     def test_rrf_multiple_ranks(self):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         score = KnowledgeDB.rrf_score([1, 1], k=60)
         expected = 2.0 * (1.0 / 61)
         assert abs(score - expected) < 0.0001
 
     def test_rrf_ignores_zero_ranks(self):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         score1 = KnowledgeDB.rrf_score([1, 0], k=60)
         score2 = KnowledgeDB.rrf_score([1], k=60)
         assert abs(score1 - score2) < 0.0001
 
     def test_rrf_higher_rank_lower_score(self):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         score_rank1 = KnowledgeDB.rrf_score([1], k=60)
         score_rank10 = KnowledgeDB.rrf_score([10], k=60)
         assert score_rank1 > score_rank10
 
     def test_rrf_different_k_values(self):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         score_k60 = KnowledgeDB.rrf_score([1], k=60)
         score_k20 = KnowledgeDB.rrf_score([1], k=20)
@@ -72,13 +72,13 @@ class TestSparseIndexPersistence:
     """Tests for sparse index persistence."""
 
     def test_sparse_index_path_set(self, temp_kb_dir):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(temp_kb_dir.parent))
         assert db.sparse_index_path == temp_kb_dir / "sparse_index.json"
 
     def test_loads_sparse_vectors_if_present(self, temp_kb_dir):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         sparse_data = {
             "0": {"token1": 0.5, "token2": 0.3},
@@ -104,14 +104,14 @@ class TestHybridSearch:
     """Tests for hybrid search with RRF fusion."""
 
     def test_search_returns_empty_for_empty_db(self, temp_kb_dir):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(temp_kb_dir.parent))
         results = db.search("test query")
         assert results == []
 
     def test_search_returns_results_with_scores(self, kb_with_entries):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(kb_with_entries.parent))
         db.rebuild_index()
@@ -122,7 +122,7 @@ class TestHybridSearch:
         assert all(r["score"] > 0 for r in results)
 
     def test_search_includes_meta_breakdown(self, kb_with_entries):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(kb_with_entries.parent))
         db.rebuild_index()
@@ -135,7 +135,7 @@ class TestHybridSearch:
         assert "rrf_score" in meta
 
     def test_search_respects_limit(self, kb_with_entries):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(kb_with_entries.parent))
         db.rebuild_index()
@@ -152,7 +152,7 @@ class TestDenseSearch:
     """Tests for dense (semantic) search."""
 
     def test_dense_search_returns_tuples(self, kb_with_entries):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(kb_with_entries.parent))
         db.rebuild_index()
@@ -162,7 +162,7 @@ class TestDenseSearch:
         assert all(isinstance(r, tuple) and len(r) == 2 for r in results)
 
     def test_dense_search_scores_sorted_descending(self, kb_with_entries):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(kb_with_entries.parent))
         db.rebuild_index()
@@ -182,7 +182,7 @@ class TestStats:
     """Tests for database statistics."""
 
     def test_stats_includes_hybrid_backend(self, kb_with_entries):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(kb_with_entries.parent))
         db.rebuild_index()
@@ -202,7 +202,7 @@ class TestRebuildIndex:
     """Tests for index rebuilding."""
 
     def test_rebuild_creates_dense_embeddings(self, kb_with_entries):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(kb_with_entries.parent))
         count = db.rebuild_index()
@@ -212,7 +212,7 @@ class TestRebuildIndex:
         assert db._embeddings.shape[0] == 3
 
     def test_rebuild_saves_files(self, kb_with_entries):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(kb_with_entries.parent))
         db.rebuild_index()
@@ -230,7 +230,7 @@ class TestAddEntry:
     """Tests for adding entries."""
 
     def test_add_generates_dense_embedding(self, temp_kb_dir):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(temp_kb_dir.parent))
         entry_id = db.add({"title": "Test Entry", "summary": "Test summary content"})
@@ -240,7 +240,7 @@ class TestAddEntry:
         assert db._embeddings.shape[0] == 1
 
     def test_add_appends_to_jsonl(self, temp_kb_dir):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(temp_kb_dir.parent))
         db.add({"title": "Entry 1", "summary": "Summary 1"})
@@ -260,7 +260,7 @@ class TestBatchAdd:
     """Tests for batch_add."""
 
     def test_batch_add_multiple_entries(self, temp_kb_dir):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(temp_kb_dir.parent))
         entries = [
@@ -275,7 +275,7 @@ class TestBatchAdd:
         assert db.count() == 3
 
     def test_batch_add_skips_invalid(self, temp_kb_dir):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(temp_kb_dir.parent))
         entries = [
@@ -289,7 +289,7 @@ class TestBatchAdd:
         assert db.count() == 2
 
     def test_batch_add_empty_list(self, temp_kb_dir):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(temp_kb_dir.parent))
         ids = db.batch_add([])
@@ -305,7 +305,7 @@ class TestRemoveEntries:
     """Tests for remove_entries (soft delete)."""
 
     def test_remove_zeros_embeddings(self, temp_kb_dir):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(temp_kb_dir.parent))
         id1 = db.add({"title": "Keep this entry", "insight": "Should remain"})
@@ -319,7 +319,7 @@ class TestRemoveEntries:
         assert np.all(db._embeddings[row_idx] == 0.0)
 
     def test_remove_rewrites_jsonl(self, temp_kb_dir):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(temp_kb_dir.parent))
         id1 = db.add({"title": "Keep this entry", "insight": "Should remain"})
@@ -344,7 +344,7 @@ class TestSubStore:
     """Tests for sub_store parameter."""
 
     def test_sub_store_uses_separate_directory(self, temp_kb_dir):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(temp_kb_dir.parent), sub_store="sessions")
 
@@ -353,7 +353,7 @@ class TestSubStore:
         assert (temp_kb_dir / "sessions").is_dir()
 
     def test_sub_stores_are_independent(self, temp_kb_dir):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db_main = KnowledgeDB(str(temp_kb_dir.parent))
         db_sessions = KnowledgeDB(str(temp_kb_dir.parent), sub_store="sessions")
@@ -378,7 +378,7 @@ class TestInferType:
     """Tests for type inference from content."""
 
     def test_infers_warning_from_signals(self):
-        from kln_knowledge.utils import infer_type
+        from knowlin_mcp.utils import infer_type
 
         assert infer_type("Don't use global state", "") == "warning"
         assert infer_type("", "This bug causes crashes") == "warning"
@@ -386,21 +386,21 @@ class TestInferType:
         assert infer_type("Deprecated API", "avoid using this") == "warning"
 
     def test_infers_solution_from_signals(self):
-        from kln_knowledge.utils import infer_type
+        from knowlin_mcp.utils import infer_type
 
         assert infer_type("Fixed memory leak", "") == "solution"
         assert infer_type("", "The workaround is to restart") == "solution"
         assert infer_type("Resolved the timeout", "") == "solution"
 
     def test_infers_pattern_from_signals(self):
-        from kln_knowledge.utils import infer_type
+        from knowlin_mcp.utils import infer_type
 
         assert infer_type("Use dependency injection", "") == "pattern"
         assert infer_type("", "The best way to handle requests") == "pattern"
         assert infer_type("Prefer composition", "") == "pattern"
 
     def test_defaults_to_finding(self):
-        from kln_knowledge.utils import infer_type
+        from knowlin_mcp.utils import infer_type
 
         assert infer_type("Random observation", "some details") == "finding"
         assert infer_type("", "") == "finding"
@@ -415,7 +415,7 @@ class TestExponentialTimeDecay:
     """Tests for exponential time decay in get_recent_important()."""
 
     def test_recent_entries_score_higher(self, temp_kb_dir):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(temp_kb_dir.parent))
 
@@ -436,7 +436,7 @@ class TestExponentialTimeDecay:
     def test_warnings_decay_faster(self, temp_kb_dir):
         import math
 
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(temp_kb_dir.parent))
 
@@ -471,7 +471,7 @@ class TestSemanticDeduplication:
     """Tests for semantic deduplication in add()."""
 
     def test_allows_distinct_entries(self, temp_kb_dir):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(temp_kb_dir.parent))
 
@@ -481,7 +481,7 @@ class TestSemanticDeduplication:
         assert db._embeddings.shape[0] == 2
 
     def test_skip_dedup_check_flag(self, temp_kb_dir):
-        from kln_knowledge.db import KnowledgeDB
+        from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(temp_kb_dir.parent))
 

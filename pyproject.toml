@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "kln-knowledge-system"
+name = "knowlin-mcp"
 version = "0.1.0"
-description = "Hybrid semantic knowledge database with multi-source search"
+description = "KnowlinMCP -- hybrid semantic knowledge database with MCP server and multi-source search"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
@@ -23,6 +23,7 @@ dependencies = [
 
 [project.optional-dependencies]
 pdf = ["pymupdf4llm>=0.0.10"]
+mcp = ["mcp>=1.2.0"]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -34,7 +35,8 @@ dev = [
 ]
 
 [project.scripts]
-kln-kb = "kln_knowledge.cli:main"
+knowlin = "knowlin_mcp.cli:main"
+knowlin-mcp = "knowlin_mcp.mcp_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -13,7 +13,7 @@ import pytest
 from hypothesis import given, settings, assume, HealthCheck
 from hypothesis import strategies as st
 
-from kln_knowledge.db import KnowledgeDB
+from knowlin_mcp.db import KnowledgeDB
 
 
 @pytest.fixture(scope="module")

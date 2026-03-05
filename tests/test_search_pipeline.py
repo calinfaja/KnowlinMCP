@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from kln_knowledge.db import KnowledgeDB
+from knowlin_mcp.db import KnowledgeDB
 
 
 @pytest.fixture

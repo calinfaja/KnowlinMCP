@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from kln_knowledge.query_utils import (
+from knowlin_mcp.query_utils import (
     QueryIntent,
     classify_query,
     expand_query,

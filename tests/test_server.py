@@ -1,4 +1,4 @@
-"""Tests for kln_knowledge server and utils modules.
+"""Tests for knowlin_mcp server and utils modules.
 
 Tests verify:
 - TCP socket communication
@@ -28,7 +28,7 @@ class TestPortFileManagement:
     """Tests for port file operations."""
 
     def test_get_kb_port_file_returns_path(self, tmp_path):
-        from kln_knowledge.platform import get_kb_port_file
+        from knowlin_mcp.platform import get_kb_port_file
 
         project = tmp_path / "test-project"
         project.mkdir()
@@ -38,7 +38,7 @@ class TestPortFileManagement:
         assert result.suffix == ".port"
 
     def test_port_file_contains_project_hash(self, tmp_path):
-        from kln_knowledge.platform import get_kb_port_file, get_project_hash
+        from knowlin_mcp.platform import get_kb_port_file, get_project_hash
 
         project = tmp_path / "test-project"
         project.mkdir()
@@ -52,17 +52,17 @@ class TestGetServerPort:
     """Tests for get_server_port()."""
 
     def test_returns_none_when_no_port_file(self, tmp_path):
-        from kln_knowledge.utils import get_server_port
+        from knowlin_mcp.utils import get_server_port
 
         project = tmp_path / "project"
         project.mkdir()
 
-        with patch("kln_knowledge.utils.get_kb_port_file", return_value=tmp_path / "nonexistent.port"):
+        with patch("knowlin_mcp.utils.get_kb_port_file", return_value=tmp_path / "nonexistent.port"):
             result = get_server_port(project)
             assert result is None
 
     def test_reads_port_from_file(self, tmp_path):
-        from kln_knowledge.utils import get_server_port
+        from knowlin_mcp.utils import get_server_port
 
         project = tmp_path / "project"
         project.mkdir()
@@ -70,7 +70,7 @@ class TestGetServerPort:
         port_file = tmp_path / "test.port"
         port_file.write_text("14567")
 
-        with patch("kln_knowledge.utils.get_kb_port_file", return_value=port_file):
+        with patch("knowlin_mcp.utils.get_kb_port_file", return_value=port_file):
             result = get_server_port(project)
             assert result == 14567
 
@@ -84,22 +84,22 @@ class TestIsServerRunning:
     """Tests for is_server_running()."""
 
     def test_returns_false_when_no_port_file(self, tmp_path):
-        from kln_knowledge.utils import is_server_running
+        from knowlin_mcp.utils import is_server_running
 
         project = tmp_path / "project"
         project.mkdir()
 
-        with patch("kln_knowledge.utils.get_server_port", return_value=None):
+        with patch("knowlin_mcp.utils.get_server_port", return_value=None):
             result = is_server_running(project)
             assert result is False
 
     def test_returns_false_when_connection_fails(self, tmp_path):
-        from kln_knowledge.utils import is_server_running
+        from knowlin_mcp.utils import is_server_running
 
         project = tmp_path / "project"
         project.mkdir()
 
-        with patch("kln_knowledge.utils.get_server_port", return_value=59999):
+        with patch("knowlin_mcp.utils.get_server_port", return_value=59999):
             result = is_server_running(project, timeout=0.1)
             assert result is False
 
@@ -108,12 +108,12 @@ class TestTcpCommunication:
     """Tests for TCP socket communication."""
 
     def test_send_command_returns_none_without_port(self, tmp_path):
-        from kln_knowledge.utils import send_command
+        from knowlin_mcp.utils import send_command
 
         project = tmp_path / "project"
         project.mkdir()
 
-        with patch("kln_knowledge.utils.get_server_port", return_value=None):
+        with patch("knowlin_mcp.utils.get_server_port", return_value=None):
             result = send_command(project, {"cmd": "ping"})
             assert result is None
 
@@ -178,14 +178,14 @@ class TestIsKbInitialized:
     """Tests for is_kb_initialized()."""
 
     def test_returns_false_when_no_kb_dir(self, tmp_path):
-        from kln_knowledge.utils import is_kb_initialized
+        from knowlin_mcp.utils import is_kb_initialized
 
         project = tmp_path / "project"
         project.mkdir()
         assert is_kb_initialized(project) is False
 
     def test_returns_true_when_kb_dir_exists(self, tmp_path):
-        from kln_knowledge.utils import is_kb_initialized
+        from knowlin_mcp.utils import is_kb_initialized
 
         project = tmp_path / "project"
         project.mkdir()
@@ -202,18 +202,18 @@ class TestCleanStaleSocket:
     """Tests for clean_stale_socket()."""
 
     def test_returns_false_when_no_port_file(self, tmp_path):
-        from kln_knowledge.utils import clean_stale_socket
+        from knowlin_mcp.utils import clean_stale_socket
 
         project = tmp_path / "project"
         project.mkdir()
 
-        with patch("kln_knowledge.utils.get_kb_port_file") as mock_port_file:
+        with patch("knowlin_mcp.utils.get_kb_port_file") as mock_port_file:
             mock_port_file.return_value = tmp_path / "nonexistent.port"
             result = clean_stale_socket(project)
             assert result is False
 
     def test_cleans_stale_files_when_server_not_running(self, tmp_path):
-        from kln_knowledge.utils import clean_stale_socket
+        from knowlin_mcp.utils import clean_stale_socket
 
         project = tmp_path / "project"
         project.mkdir()
@@ -223,9 +223,9 @@ class TestCleanStaleSocket:
         port_file.write_text("59999")
         pid_file.write_text("999999")
 
-        with patch("kln_knowledge.utils.get_kb_port_file", return_value=port_file), \
-             patch("kln_knowledge.utils.get_kb_pid_file", return_value=pid_file), \
-             patch("kln_knowledge.utils.is_server_running", return_value=False):
+        with patch("knowlin_mcp.utils.get_kb_port_file", return_value=port_file), \
+             patch("knowlin_mcp.utils.get_kb_pid_file", return_value=pid_file), \
+             patch("knowlin_mcp.utils.is_server_running", return_value=False):
             result = clean_stale_socket(project)
             assert result is True
             assert not port_file.exists()
@@ -242,13 +242,13 @@ class TestCrossPlatform:
 
     def test_uses_tcp_not_unix_socket(self):
         import inspect
-        from kln_knowledge.utils import is_server_running
+        from knowlin_mcp.utils import is_server_running
 
         source = inspect.getsource(is_server_running)
         assert "AF_INET" in source
         assert "AF_UNIX" not in source
 
     def test_host_is_localhost(self):
-        from kln_knowledge.platform import HOST
+        from knowlin_mcp.platform import HOST
 
         assert HOST == "127.0.0.1"

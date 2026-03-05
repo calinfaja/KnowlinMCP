@@ -1,4 +1,4 @@
-"""Shared utilities for KLN Knowledge System.
+"""Shared utilities for KnowlinMCP.
 
 TCP communication, schema constants, type inference, and debug logging.
 """
@@ -11,7 +11,7 @@ import socket
 import sys
 from pathlib import Path
 
-from kln_knowledge.platform import (
+from knowlin_mcp.platform import (
     HOST,
     KB_DIR_NAME,
     get_kb_pid_file,
@@ -24,8 +24,8 @@ from kln_knowledge.platform import (
 
 
 def debug_log(msg: str, category: str = "kb") -> None:
-    """Log debug message if KLEAN_DEBUG is set."""
-    if os.environ.get("KLEAN_DEBUG"):
+    """Log debug message if KNOWLIN_DEBUG env var is set."""
+    if os.environ.get("KNOWLIN_DEBUG"):
         print(f"[{category}] {msg}", file=sys.stderr)
 
 

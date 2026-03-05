@@ -8,13 +8,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from kln_knowledge.db import KnowledgeDB
-from kln_knowledge.query_utils import (
+from knowlin_mcp.db import KnowledgeDB
+from knowlin_mcp.query_utils import (
     classify_query,
     expand_query,
     get_source_weights,
 )
-from kln_knowledge.utils import debug_log
+from knowlin_mcp.utils import debug_log
 
 
 class MultiSourceSearch:
