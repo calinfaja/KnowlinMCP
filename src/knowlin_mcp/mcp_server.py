@@ -219,13 +219,13 @@ def knowlin_ingest(source: str = "all") -> str:
     """Ingest documents and/or session transcripts into the knowledge database.
 
     Args:
-        source: What to ingest: "docs", "sessions", or "all" (default)
+        source: What to ingest: "docs", "sessions", "codex", or "all" (default)
     """
     try:
         root = _get_project_root()
         source = source.strip().lower()
-        if source not in ("docs", "sessions", "all"):
-            return f"Invalid source: {source}. Use 'docs', 'sessions', or 'all'."
+        if source not in ("docs", "sessions", "codex", "all"):
+            return f"Invalid source: {source}. Use 'docs', 'sessions', 'codex', or 'all'."
 
         results = []
 
@@ -240,6 +240,12 @@ def knowlin_ingest(source: str = "all") -> str:
 
             count = SessionIngester(root).ingest()
             results.append(f"Sessions: {count} entries ingested")
+
+        if source in ("codex", "all"):
+            from knowlin_mcp.ingest_codex import CodexIngester
+
+            count = CodexIngester(root).ingest()
+            results.append(f"Codex: {count} entries ingested")
 
         return "\n".join(results)
 

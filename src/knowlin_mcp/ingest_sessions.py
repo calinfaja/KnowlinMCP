@@ -77,6 +77,47 @@ _USER_NOISE_MARKERS = [
 ]
 
 
+
+def score_content(text: str) -> tuple[float, str]:
+    """Score content by importance and infer type.
+
+    Returns (score, type) where score is 0-1.
+    Substantive messages (>= SUBSTANTIVE_LENGTH chars) always pass.
+    """
+    # Skip patterns only apply to short messages
+    if len(text) < SUBSTANTIVE_LENGTH:
+        for pattern in _SKIP_PATTERNS:
+            if re.match(pattern, text, re.IGNORECASE):
+                return (0.0, "")
+
+    text_lower = text.lower()
+    best_score = 0.0
+    best_type = "finding"
+
+    for entry_type, signals in _VALUE_SIGNALS.items():
+        matches = sum(1 for s in signals if s in text_lower)
+        if matches > 0:
+            score = min(1.0, 0.3 + matches * 0.2)
+            if score > best_score:
+                best_score = score
+                best_type = entry_type
+
+    # Length bonus (longer = more substantive)
+    length_bonus = min(0.3, len(text) / 1500)
+    best_score += length_bonus
+
+    # Code block bonus
+    if "```" in text:
+        best_score += 0.1
+
+    # Markdown structure bonus (headers, tables, lists indicate organized content)
+    if re.search(r"^#{1,3}\s", text, re.MULTILINE):
+        best_score += 0.1
+    if "|" in text and "---" in text:
+        best_score += 0.05
+
+    return (min(1.0, best_score), best_type)
+
 class SessionIngester:
     """Ingest Claude Code JSONL session transcripts into knowledge DB."""
 
@@ -157,44 +198,8 @@ class SessionIngester:
         return h.hexdigest()
 
     def _score_content(self, text: str) -> tuple[float, str]:
-        """Score content by importance and infer type.
-
-        Returns (score, type) where score is 0-1.
-        Substantive messages (>= SUBSTANTIVE_LENGTH chars) always pass.
-        """
-        # Skip patterns only apply to short messages
-        if len(text) < SUBSTANTIVE_LENGTH:
-            for pattern in _SKIP_PATTERNS:
-                if re.match(pattern, text, re.IGNORECASE):
-                    return (0.0, "")
-
-        text_lower = text.lower()
-        best_score = 0.0
-        best_type = "finding"
-
-        for entry_type, signals in _VALUE_SIGNALS.items():
-            matches = sum(1 for s in signals if s in text_lower)
-            if matches > 0:
-                score = min(1.0, 0.3 + matches * 0.2)
-                if score > best_score:
-                    best_score = score
-                    best_type = entry_type
-
-        # Length bonus (longer = more substantive)
-        length_bonus = min(0.3, len(text) / 1500)
-        best_score += length_bonus
-
-        # Code block bonus
-        if "```" in text:
-            best_score += 0.1
-
-        # Markdown structure bonus (headers, tables, lists indicate organized content)
-        if re.search(r"^#{1,3}\s", text, re.MULTILINE):
-            best_score += 0.1
-        if "|" in text and "---" in text:
-            best_score += 0.05
-
-        return (min(1.0, best_score), best_type)
+        """Score content by importance and infer type."""
+        return score_content(text)
 
     def _extract_text_from_content(self, content: Any) -> str:
         """Extract text from a message content field.

@@ -561,6 +561,20 @@ def ingest_sessions(full, project):
     console.print(f"Ingested {count} entries from sessions")
 
 
+@ingest.command("codex")
+@click.option("--full", is_flag=True, help="Process all Codex sessions (not just new)")
+@click.option("--project", "-p", help="Project path")
+def ingest_codex(full, project):
+    """Ingest Codex CLI session transcripts."""
+    root = _resolve_project(project)
+
+    from knowlin_mcp.ingest_codex import CodexIngester
+
+    ingester = CodexIngester(str(root))
+    count = ingester.ingest(full=full)
+    console.print(f"Ingested {count} entries from Codex sessions")
+
+
 @ingest.command("docs")
 @click.option("--path", "docs_path", help="Path to docs directory")
 @click.option("--full", is_flag=True, help="Re-process all docs")
@@ -593,6 +607,16 @@ def ingest_all(full, project):
         total += count
     except Exception as e:
         console.print(f"[yellow]Sessions skipped: {e}[/yellow]")
+
+    from knowlin_mcp.ingest_codex import CodexIngester
+
+    try:
+        ingester = CodexIngester(str(root))
+        count = ingester.ingest(full=full)
+        console.print(f"Codex: {count} entries")
+        total += count
+    except Exception as e:
+        console.print(f"[yellow]Codex skipped: {e}[/yellow]")
 
     from knowlin_mcp.ingest_docs import DocsIngester
 

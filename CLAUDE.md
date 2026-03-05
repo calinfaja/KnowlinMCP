@@ -68,6 +68,7 @@ All tools are in the `.venv`. Use `.venv/bin/` prefix or activate the venv first
 | `capture.py` | Entry creation and save with fallback chain (server -> DB -> JSONL append) |
 | `ingest_docs.py` | Markdown/PDF document ingestion with heading-based chunking |
 | `ingest_sessions.py` | Claude Code session transcript extraction |
+| `ingest_codex.py` | Codex CLI session transcript extraction |
 | `cli.py` | Click CLI (entry point: `knowlin`) |
 | `mcp_server.py` | FastMCP server (entry point: `knowlin-mcp`) -- 4 tools for MCP clients |
 | `server.py` | TCP daemon keeping embeddings in RAM for fast queries |
