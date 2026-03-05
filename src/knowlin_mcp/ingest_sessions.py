@@ -1,7 +1,13 @@
 """Session Ingester - Extract knowledge from Claude Code JSONL transcripts.
 
+Claude Code JSONL format (per-line records):
+- Top-level `type` field: "user", "assistant", "progress", "system",
+  "file-history-snapshot", "queue-operation"
+- Actual message content at record["message"]["content"]
+- Content is a list of typed blocks: text, tool_use, tool_result, thinking
+
 Two-phase pipeline:
-1. Parse JSONL files, extract assistant messages with high-value content
+1. Parse JSONL files, extract assistant text blocks with high-value content
 2. Score by importance, batch-embed into sessions sub-store
 
 Registry tracks which files have been processed (SHA-256 hash).
@@ -19,7 +25,10 @@ from typing import Any
 from knowlin_mcp.utils import debug_log
 
 # Minimum content length worth indexing (skip trivial responses)
-MIN_CONTENT_LENGTH = 100
+MIN_CONTENT_LENGTH = 150
+
+# Substantive content length -- always accept if above this threshold
+SUBSTANTIVE_LENGTH = 300
 
 # Signals that indicate high-value content in assistant messages
 _VALUE_SIGNALS = {
@@ -45,7 +54,7 @@ _VALUE_SIGNALS = {
     ],
 }
 
-# Content to skip (tool output, status messages, etc.)
+# Content to skip (only applied to short messages < SUBSTANTIVE_LENGTH)
 _SKIP_PATTERNS = [
     r"^```\n[\s\S]{0,50}\n```$",  # Very short code blocks
     r"^I'll ",  # "I'll do X" filler
@@ -54,6 +63,17 @@ _SKIP_PATTERNS = [
     r"^OK,? ",
     r"^Done\.?\s*$",
     r"^Here's the ",  # Generic intros
+]
+
+# Noise markers in user messages that indicate non-human content
+_USER_NOISE_MARKERS = [
+    "<command-name>",
+    "<local-command",
+    "<system-reminder>",
+    "[Request interrupted",
+    "This session is being continued",
+    "## Triggers",  # Slash command definitions injected as user text
+    "## When to",
 ]
 
 
@@ -90,28 +110,25 @@ class SessionIngester:
         self._registry: dict[str, dict] = self._load_registry()
 
     def _find_sessions_dir(self) -> Path | None:
-        """Find the Claude Code sessions directory for this project."""
+        """Find the Claude Code sessions directory for this project.
+
+        Claude Code stores sessions at ~/.claude/projects/<mangled-path>/
+        where the directory name is the project path with / replaced by -.
+        """
         claude_dir = Path.home() / ".claude" / "projects"
         if not claude_dir.exists():
             return None
 
-        # Claude Code stores projects by path hash
-        # Look for directories that contain JSONL files
         project_str = str(self.project_path)
+        # Claude Code mangles: /home/user/Project/foo -> -home-user-Project-foo
+        expected = project_str.replace("/", "-")
 
         for d in claude_dir.iterdir():
             if not d.is_dir():
                 continue
-            # Check if this directory has JSONL files
-            jsonl_files = list(d.glob("*.jsonl"))
-            if jsonl_files:
-                # Heuristic: check if the directory name matches our project
-                # Claude Code uses a mangled path as the directory name
-                dir_name = d.name
-                # Convert /home/user/Project/foo to -home-user-Project-foo
-                mangled = project_str.replace("/", "-").lstrip("-")
-                if mangled in dir_name:
-                    return d
+            # Exact match on mangled path
+            if d.name == expected:
+                return d
 
         return None
 
@@ -143,39 +160,48 @@ class SessionIngester:
         """Score content by importance and infer type.
 
         Returns (score, type) where score is 0-1.
+        Substantive messages (>= SUBSTANTIVE_LENGTH chars) always pass.
         """
+        # Skip patterns only apply to short messages
+        if len(text) < SUBSTANTIVE_LENGTH:
+            for pattern in _SKIP_PATTERNS:
+                if re.match(pattern, text, re.IGNORECASE):
+                    return (0.0, "")
+
         text_lower = text.lower()
-
-        # Check for skip patterns
-        for pattern in _SKIP_PATTERNS:
-            if re.match(pattern, text, re.IGNORECASE):
-                return (0.0, "")
-
         best_score = 0.0
         best_type = "finding"
 
         for entry_type, signals in _VALUE_SIGNALS.items():
             matches = sum(1 for s in signals if s in text_lower)
             if matches > 0:
-                # More signal matches = higher score
                 score = min(1.0, 0.3 + matches * 0.2)
                 if score > best_score:
                     best_score = score
                     best_type = entry_type
 
-        # Length bonus (longer = more substantive, up to a point)
-        length_bonus = min(0.2, len(text) / 2000)
+        # Length bonus (longer = more substantive)
+        length_bonus = min(0.3, len(text) / 1500)
         best_score += length_bonus
 
-        # Code block bonus (concrete examples are valuable)
+        # Code block bonus
         if "```" in text:
             best_score += 0.1
 
+        # Markdown structure bonus (headers, tables, lists indicate organized content)
+        if re.search(r"^#{1,3}\s", text, re.MULTILINE):
+            best_score += 0.1
+        if "|" in text and "---" in text:
+            best_score += 0.05
+
         return (min(1.0, best_score), best_type)
 
-    def _extract_text(self, msg: dict) -> str:
-        """Extract text content from a message."""
-        content = msg.get("content", "")
+    def _extract_text_from_content(self, content: Any) -> str:
+        """Extract text from a message content field.
+
+        Handles both string content and list-of-blocks content.
+        Only extracts 'text' type blocks (skips tool_use, tool_result, thinking).
+        """
         if isinstance(content, str):
             return content.strip()
         if isinstance(content, list):
@@ -186,11 +212,50 @@ class SessionIngester:
             return "\n".join(parts).strip()
         return ""
 
-    def _extract_from_jsonl(self, path: Path) -> list[dict[str, Any]]:
-        """Extract high-value entries from a JSONL transcript.
+    def _is_real_user_message(self, content: Any) -> str:
+        """Extract clean text from a real human message, or empty string for noise.
 
-        Pairs user+assistant messages into turns.
-        Scores each turn by importance and filters low-value content.
+        Filters out:
+        - tool_result blocks (92% of user records)
+        - Slash command definitions injected as text
+        - Compact continuation summaries
+        - System reminders and local command output
+        """
+        if isinstance(content, str):
+            text = content.strip()
+            if any(marker in text for marker in _USER_NOISE_MARKERS):
+                return ""
+            return text
+
+        if isinstance(content, list):
+            # If any block is a tool_result, this is a tool return -- not human input
+            if any(
+                isinstance(b, dict) and b.get("type") == "tool_result"
+                for b in content
+            ):
+                return ""
+            # Extract text blocks only
+            parts = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(block.get("text", ""))
+            text = "\n".join(parts).strip()
+            if any(marker in text for marker in _USER_NOISE_MARKERS):
+                return ""
+            return text
+
+        return ""
+
+    def _extract_from_jsonl(self, path: Path) -> list[dict[str, Any]]:
+        """Extract high-value entries from a Claude Code JSONL transcript.
+
+        Claude Code JSONL records have:
+        - Top-level `type`: "user", "assistant", "progress", etc.
+        - Message content at record["message"]["content"]
+        - Content is list of blocks: {type: "text"}, {type: "tool_use"}, etc.
+
+        Pairs user questions with assistant text responses.
+        Scores each response by importance and filters low-value content.
         """
         entries: list[dict[str, Any]] = []
         last_user_text = ""
@@ -201,30 +266,47 @@ class SessionIngester:
                     if not line.strip():
                         continue
                     try:
-                        msg = json.loads(line)
+                        record = json.loads(line)
                     except json.JSONDecodeError:
                         continue
 
-                    role = msg.get("role")
+                    record_type = record.get("type")
 
-                    # Track last user message for pairing
-                    if role == "user":
-                        text = self._extract_text(msg)
+                    # Track last real user question for pairing
+                    if record_type == "user":
+                        msg = record.get("message", {})
+                        text = self._is_real_user_message(msg.get("content", ""))
                         if text and len(text) > 10:
                             last_user_text = text
                         continue
 
-                    if role != "assistant":
+                    # queue-operation enqueue = cleaner user input
+                    if record_type == "queue-operation":
+                        content = record.get("content", "")
+                        if (
+                            record.get("operation") == "enqueue"
+                            and isinstance(content, str)
+                            and len(content) > 10
+                            and not any(m in content for m in _USER_NOISE_MARKERS)
+                        ):
+                            last_user_text = content.strip()
                         continue
 
-                    # Extract assistant text
-                    assistant_text = self._extract_text(msg)
+                    # Only process assistant records
+                    if record_type != "assistant":
+                        continue
+
+                    # Extract text from the message (skip tool_use, thinking blocks)
+                    msg = record.get("message", {})
+                    content = msg.get("content", [])
+                    assistant_text = self._extract_text_from_content(content)
+
                     if len(assistant_text) < MIN_CONTENT_LENGTH:
                         continue
 
                     # Score the assistant content
                     score, entry_type = self._score_content(assistant_text)
-                    if score < 0.3:
+                    if score < 0.2:
                         continue
 
                     # Build title from user question or first meaningful line
@@ -240,7 +322,7 @@ class SessionIngester:
                     if not title:
                         title = assistant_text[:100]
 
-                    # Combine user question + assistant response for searchability
+                    # Combine user question + assistant response
                     insight_parts = []
                     if last_user_text:
                         insight_parts.append(last_user_text[:300])
@@ -253,7 +335,7 @@ class SessionIngester:
                     entries.append({
                         "title": title,
                         "insight": insight,
-                        "type": "session",
+                        "type": entry_type or "session",
                         "priority": "high" if score > 0.7 else "medium",
                         "keywords": [],
                         "source": f"session:{path.name}",
@@ -271,13 +353,10 @@ class SessionIngester:
 
     def _extract_date(self, path: Path) -> str:
         """Extract date from session file path or mtime."""
-        # Try to extract from filename (e.g., 2026-03-04_session.jsonl)
         name = path.stem
         date_match = re.search(r"(\d{4}-\d{2}-\d{2})", name)
         if date_match:
             return date_match.group(1)
-
-        # Fall back to file modification time
         mtime = path.stat().st_mtime
         return datetime.fromtimestamp(mtime).strftime("%Y-%m-%d")
 
@@ -322,8 +401,11 @@ class SessionIngester:
             debug_log("No sessions directory found")
             return 0
 
-        # Find JSONL files
+        # Find JSONL files (top-level + subagent subdirectories)
         jsonl_files = sorted(self.sessions_dir.glob("*.jsonl"))
+        for subdir in self.sessions_dir.iterdir():
+            if subdir.is_dir():
+                jsonl_files.extend(sorted(subdir.glob("*.jsonl")))
 
         # Cleanup entries for deleted files
         current_file_keys = {p.name for p in jsonl_files}
@@ -365,20 +447,17 @@ class SessionIngester:
                 db.remove_entries(old_ids)
                 debug_log(f"Removed {len(old_ids)} old entries for {path.name}")
 
-        # Extract entries from all files, sort per-file (not globally) to
-        # preserve file-to-ID mapping when distributing batch_add results
+        # Extract entries from all files
         all_entries = []
         file_entry_counts: list[tuple[str, int]] = []
 
         for path in to_process:
             entries = self._extract_from_jsonl(path)
-            # Sort within each file's entries (preserves per-file boundary)
             entries.sort(key=lambda x: x.get("_importance_score", 0), reverse=True)
             file_entry_counts.append((path.name, len(entries)))
             all_entries.extend(entries)
 
         if not all_entries:
-            # Update registry even if no entries extracted (marks files as processed)
             for path in to_process:
                 self._registry[path.name] = {
                     "hash": file_hashes.get(path.name) or self._file_hash(path),
