@@ -62,6 +62,7 @@ All tools are in the `.venv`. Use `.venv/bin/` prefix or activate the venv first
 | Module | Responsibility |
 |--------|---------------|
 | `db.py` | Core `KnowledgeDB` class -- JSONL storage, dense/sparse search, RRF fusion, reranking |
+| `models.py` | Embedding model singletons (BGE, SPLADE++, cross-encoder) -- lazy-loaded, shared |
 | `multi_search.py` | `MultiSourceSearch` -- orchestrates search across 3 sub-stores with intent-aware weighting |
 | `search.py` | Result formatters (compact, detailed, inject, json) |
 | `capture.py` | Entry creation and save with fallback chain (server -> DB -> JSONL append) |
@@ -96,7 +97,7 @@ Each sub-store has its own `entries.jsonl`, `embeddings.npy`, `sparse_index.json
 
 ### Model singletons
 
-Global lazy-loaded models in `db.py`:
+Global lazy-loaded models in `models.py`:
 - `_dense_model`: BAAI/bge-small-en-v1.5 (384-dim)
 - `_sparse_model`: prithivida/Splade_PP_en_v1
 - `_reranker`: Xenova/ms-marco-MiniLM-L-6-v2

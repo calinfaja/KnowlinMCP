@@ -17,6 +17,13 @@ from knowlin_mcp.query_utils import (
 from knowlin_mcp.utils import debug_log
 
 
+def _jaccard(a: set[str], b: set[str]) -> float:
+    """Jaccard similarity between two token sets."""
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
 class MultiSourceSearch:
     """Search across multiple knowledge sources with weighted RRF fusion.
 
@@ -125,16 +132,22 @@ class MultiSourceSearch:
         # Sort by weighted score descending
         all_results.sort(key=lambda x: x.get("_weighted_score", 0), reverse=True)
 
-        # Deduplicate by title (or ID for untitled entries)
-        seen_keys = set()
+        # Deduplicate by fuzzy title similarity (Jaccard on tokens)
         deduped = []
+        seen_titles: list[set[str]] = []  # Token sets of accepted titles
+        seen_ids: set[str] = set()
         for r in all_results:
-            title = r.get("title", "").lower().strip()
-            dedup_key = title or r.get("id", "")
-            if dedup_key and dedup_key in seen_keys:
+            eid = r.get("id", "")
+            if eid and eid in seen_ids:
                 continue
-            if dedup_key:
-                seen_keys.add(dedup_key)
+            title = r.get("title", "").lower().strip()
+            if title:
+                tokens = set(title.split())
+                if tokens and any(_jaccard(tokens, s) > 0.7 for s in seen_titles):
+                    continue
+                seen_titles.append(tokens)
+            if eid:
+                seen_ids.add(eid)
             deduped.append(r)
 
         # Normalize scores to 0-1 range
