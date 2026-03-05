@@ -23,7 +23,7 @@ dependencies = [
 
 [project.optional-dependencies]
 pdf = ["pymupdf4llm>=0.0.10"]
-mcp = ["mcp>=1.2.0"]
+mcp = ["mcp>=1.9.0"]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -33,6 +33,11 @@ dev = [
     "ruff>=0.4.0",
     "black>=24.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/calinfaja/KnowlinMCP"
+Repository = "https://github.com/calinfaja/KnowlinMCP"
+Issues = "https://github.com/calinfaja/KnowlinMCP/issues"
 
 [project.scripts]
 knowlin = "knowlin_mcp.cli:main"

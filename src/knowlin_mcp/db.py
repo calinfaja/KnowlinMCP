@@ -3,12 +3,12 @@
 Storage:
 - entries.jsonl: Source of truth (human-readable)
 - embeddings.npy: Dense vectors (384-dim BGE)
-- sparse_index.json: Sparse vectors (BM42 learned token weights)
+- sparse_index.json: Sparse vectors (SPLADE++ learned token weights)
 - index.json: ID to row mapping
 
 Search pipeline:
 1. Dense search (semantic similarity via BGE)
-2. Sparse search (keyword matching via BM42 with learned attention)
+2. Sparse search (keyword matching via SPLADE++)
 3. RRF fusion of both result sets
 4. Optional cross-encoder reranking
 """
@@ -41,18 +41,47 @@ TextCrossEncoder = None
 _dense_model: Optional[TextEmbedding] = None
 _sparse_model = None
 _reranker = None
+_first_run_warned = False
+
+_MODEL_NAMES = [
+    "BAAI/bge-small-en-v1.5",
+    "prithivida/Splade_PP_en_v1",
+    "Xenova/ms-marco-MiniLM-L-6-v2",
+]
+
+
+def _warn_if_first_run() -> None:
+    """Print a one-time warning if embedding models need to be downloaded."""
+    global _first_run_warned
+    if _first_run_warned:
+        return
+    _first_run_warned = True
+
+    import os
+    import sys
+
+    cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "fastembed")
+    if os.path.isdir(cache_dir) and os.listdir(cache_dir):
+        return  # Models already cached
+
+    print(
+        "First run: downloading embedding models (~200MB). This may take a few minutes...",
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def get_dense_model() -> TextEmbedding:
     """Get or create singleton dense embedding model (BGE-small, 384-dim)."""
     global _dense_model
     if _dense_model is None:
+        _warn_if_first_run()
         _dense_model = TextEmbedding("BAAI/bge-small-en-v1.5")
     return _dense_model
 
 
 def get_sparse_model():
-    """Get or create singleton sparse embedding model (BM42)."""
+    """Get or create singleton sparse embedding model (SPLADE++)."""
     global _sparse_model, SparseTextEmbedding
     if _sparse_model is None:
         if SparseTextEmbedding is None:
@@ -63,7 +92,7 @@ def get_sparse_model():
             except ImportError:
                 debug_log("SparseTextEmbedding not available, falling back to dense-only")
                 return None
-        _sparse_model = SparseTextEmbedding("Qdrant/bm42-all-minilm-l6-v2-attentions")
+        _sparse_model = SparseTextEmbedding("prithivida/Splade_PP_en_v1")
     return _sparse_model
 
 
@@ -93,7 +122,7 @@ class KnowledgeDB:
     RRF_K = 60
     MAX_PINNED = 15
 
-    def __init__(self, project_path: str = None, sub_store: str | None = None):
+    def __init__(self, project_path: str | None = None, sub_store: str | None = None):
         """Initialize KnowledgeDB.
 
         Args:
@@ -101,16 +130,18 @@ class KnowledgeDB:
             sub_store: Optional sub-store name (e.g., "sessions", "docs").
                        Uses separate files within .knowledge-db/{sub_store}/.
         """
+        root: Path | None
         if project_path:
-            self.project_root = Path(project_path).resolve()
+            root = Path(project_path).resolve()
         else:
-            self.project_root = find_project_root()
+            root = find_project_root()
 
-        if not self.project_root:
+        if not root:
             raise ValueError(
                 "Could not find project root. "
                 "Make sure you're in a directory with .serena, .claude, or .knowledge-db"
             )
+        self.project_root: Path = root
 
         self.sub_store = sub_store
         self.db_path = self.project_root / ".knowledge-db"
@@ -215,7 +246,7 @@ class KnowledgeDB:
                     elif eid:
                         unindexed.append(e)
 
-                self._entries = [None] * len(self._embeddings)
+                self._entries = [None] * len(self._embeddings)  # type: ignore[list-item]
                 for eid, row_idx in self._id_to_row.items():
                     if eid in entries_by_id and row_idx < len(self._entries):
                         self._entries[row_idx] = entries_by_id[eid]
@@ -288,7 +319,7 @@ class KnowledgeDB:
         return sum(1.0 / (k + rank) for rank in ranks if rank > 0)
 
     def _generate_sparse_embedding(self, text: str) -> dict[str, float]:
-        """Generate sparse embedding using BM42. Returns empty dict if unavailable."""
+        """Generate sparse embedding using SPLADE++. Returns empty dict if unavailable."""
         if self.sparse_model is None:
             return {}
 
@@ -318,7 +349,7 @@ class KnowledgeDB:
         return [(int(idx), float(scores[idx])) for idx in top_indices]
 
     def _sparse_search(self, query: str, limit: int) -> list[tuple]:
-        """Sparse (keyword) search using BM42."""
+        """Sparse (keyword) search using SPLADE++."""
         if not self._sparse_vectors:
             return []
 
@@ -398,7 +429,7 @@ class KnowledgeDB:
                         f"Duplicate detected (score={similar[0]['score']:.2f}): "
                         f"'{similar[0].get('title', '')[:50]}'"
                     )
-                    return existing_id
+                    return str(existing_id) if existing_id else ""
             except Exception as e:
                 debug_log(f"Dedup check failed (proceeding with add): {e}")
 
@@ -628,7 +659,7 @@ class KnowledgeDB:
                 results.append(entry)
 
         # Deduplicate by entry ID
-        seen_ids = {}
+        seen_ids: dict[str, dict[str, Any]] = {}
         for entry in results:
             eid = entry.get("id", "")
             if eid and (eid not in seen_ids or entry["score"] > seen_ids[eid]["score"]):

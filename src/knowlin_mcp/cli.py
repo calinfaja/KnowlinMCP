@@ -97,9 +97,9 @@ def search(
 
         entry = db.get(entry_id)
         if not entry:
-            for e in db._entries:
-                if e.get("id", "").startswith(entry_id):
-                    entry = e
+            for candidate in db._entries:
+                if candidate and candidate.get("id", "").startswith(entry_id):
+                    entry = candidate
                     break
         if entry:
             if fmt == "json":

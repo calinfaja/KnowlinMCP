@@ -16,9 +16,6 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
-
 # =============================================================================
 # Port File Tests
 # =============================================================================
@@ -242,6 +239,7 @@ class TestCrossPlatform:
 
     def test_uses_tcp_not_unix_socket(self):
         import inspect
+
         from knowlin_mcp.utils import is_server_running
 
         source = inspect.getsource(is_server_running)

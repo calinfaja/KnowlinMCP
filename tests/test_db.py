@@ -2,7 +2,7 @@
 
 Tests the hybrid search system with RRF fusion:
 - Dense search (semantic similarity via BGE)
-- Sparse search (keyword matching via BM42)
+- Sparse search (keyword matching via SPLADE++)
 - RRF scoring
 - Semantic deduplication
 - batch_add and remove_entries
@@ -13,12 +13,8 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta
-from pathlib import Path
-from unittest.mock import patch
 
 import numpy as np
-import pytest
-
 
 # =============================================================================
 # TestRRFScore
@@ -308,7 +304,7 @@ class TestRemoveEntries:
         from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(temp_kb_dir.parent))
-        id1 = db.add({"title": "Keep this entry", "insight": "Should remain"})
+        db.add({"title": "Keep this entry", "insight": "Should remain"})
         id2 = db.add({"title": "Remove this entry", "insight": "Should be removed"})
 
         removed = db.remove_entries([id2])

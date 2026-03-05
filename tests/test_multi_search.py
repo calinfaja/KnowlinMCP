@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from knowlin_mcp.multi_search import MultiSourceSearch
-from knowlin_mcp.query_utils import QueryIntent
 
 
 @pytest.fixture

@@ -15,6 +15,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 from knowlin_mcp.platform import (
     HOST,
@@ -101,16 +102,15 @@ class KnowledgeServer:
     """TCP-based knowledge server for fast semantic search."""
 
     def __init__(self, project_path: str | Path | None = None):
-        self.project_root = find_project_root(
-            Path(project_path) if project_path else None
-        )
-        if not self.project_root:
+        root = find_project_root(Path(project_path) if project_path else None)
+        if not root:
             raise ValueError(
                 f"No .knowledge-db found from {project_path or os.getcwd()}"
             )
+        self.project_root: Path = root
 
         self.port = 0
-        self.db = None
+        self.db: Any = None
         self.running = False
         self.load_time = 0.0
         self.last_activity = time.time()

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
+from mcp.types import ToolAnnotations
 
 from knowlin_mcp.platform import find_project_root
 
@@ -16,6 +18,11 @@ mcp = FastMCP(
 )
 
 _project_root: str | None = None
+
+_READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
+_WRITE = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
+)
 
 
 def _get_project_root() -> str:
@@ -39,14 +46,14 @@ def _parse_sources(sources: str) -> list[str]:
     return [s.strip().lower() for s in sources.split(",") if s.strip()]
 
 
-@mcp.tool()
+@mcp.tool(title="Search Knowledge Base", annotations=_READ_ONLY)
 def knowlin_search(
     query: str,
     limit: int = 5,
     sources: str = "all",
     since: str = "",
     until: str = "",
-    type: str = "",
+    entry_type: str = "",
 ) -> str:
     """Search the knowledge database with hybrid semantic + keyword matching.
 
@@ -56,7 +63,7 @@ def knowlin_search(
         sources: Comma-separated sources: kb, sessions, docs, or "all" (default)
         since: Filter results after this date (YYYY-MM-DD)
         until: Filter results before this date (YYYY-MM-DD)
-        type: Filter by entry type (finding, solution, pattern, warning, decision, discovery)
+        entry_type: Filter by type (finding, solution, pattern, warning, decision, discovery)
     """
     try:
         from knowlin_mcp.multi_search import MultiSourceSearch
@@ -72,7 +79,7 @@ def knowlin_search(
             limit=limit,
             date_from=since or None,
             date_to=until or None,
-            entry_type=type or None,
+            entry_type=entry_type or None,
         )
 
         if not results:
@@ -107,10 +114,10 @@ def knowlin_search(
         return "\n".join(lines)
 
     except Exception as e:
-        return f"Search error: {e}"
+        raise ToolError(f"Search error: {e}") from e
 
 
-@mcp.tool()
+@mcp.tool(title="Get Knowledge Entry", annotations=_READ_ONLY)
 def knowlin_get(entry_id: str) -> str:
     """Retrieve the full details of a knowledge entry by its ID.
 
@@ -132,7 +139,7 @@ def knowlin_get(entry_id: str) -> str:
         return f"Entry not found: {entry_id}"
 
     except Exception as e:
-        return f"Get error: {e}"
+        raise ToolError(f"Get error: {e}") from e
 
 
 def _format_full_entry(entry: dict, source: str) -> str:
@@ -174,7 +181,7 @@ def _format_full_entry(entry: dict, source: str) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@mcp.tool(title="Knowledge DB Statistics", annotations=_READ_ONLY)
 def knowlin_stats() -> str:
     """Show knowledge database statistics (entry counts, sizes, health)."""
     try:
@@ -204,10 +211,10 @@ def knowlin_stats() -> str:
         return "\n".join(lines)
 
     except Exception as e:
-        return f"Stats error: {e}"
+        raise ToolError(f"Stats error: {e}") from e
 
 
-@mcp.tool()
+@mcp.tool(title="Ingest Documents & Sessions", annotations=_WRITE)
 def knowlin_ingest(source: str = "all") -> str:
     """Ingest documents and/or session transcripts into the knowledge database.
 
@@ -237,7 +244,7 @@ def knowlin_ingest(source: str = "all") -> str:
         return "\n".join(results)
 
     except Exception as e:
-        return f"Ingest error: {e}"
+        raise ToolError(f"Ingest error: {e}") from e
 
 
 def main():

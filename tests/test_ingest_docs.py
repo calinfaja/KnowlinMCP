@@ -9,11 +9,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from knowlin_mcp.ingest_docs import (
-    DocsIngester,
     MAX_CHUNK_CHARS,
     MIN_CHUNK_CHARS,
-    load_sources_config,
+    DocsIngester,
     _resolve_paths,
+    load_sources_config,
 )
 
 
@@ -681,7 +681,7 @@ class TestSessionSourcesConfig:
         (project / ".knowledge-db").mkdir()
 
         from knowlin_mcp.ingest_sessions import SessionIngester
-        ingester = SessionIngester(str(project))
+        SessionIngester(str(project))  # should not raise
         # auto_discover is True by default, sessions_dir may be None
         # if no claude projects dir exists -- that's fine
 

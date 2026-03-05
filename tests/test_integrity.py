@@ -48,7 +48,7 @@ class TestFileAlignment:
     def test_embedding_rows_match_jsonl_count(self, populated_db):
         db_path = populated_db / ".knowledge-db"
         embeddings = np.load(str(db_path / "embeddings.npy"))
-        lines = [l for l in (db_path / "entries.jsonl").read_text().splitlines() if l.strip()]
+        lines = [ln for ln in (db_path / "entries.jsonl").read_text().splitlines() if ln.strip()]
         assert embeddings.shape[0] == len(lines)
 
     def test_index_row_values_are_contiguous(self, populated_db):

@@ -10,7 +10,7 @@ Verify invariants that must hold for ALL inputs:
 from __future__ import annotations
 
 import pytest
-from hypothesis import given, settings, assume, HealthCheck
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from knowlin_mcp.db import KnowledgeDB

@@ -67,7 +67,7 @@ def classify_query(query: str) -> QueryIntent:
             scores[intent] = score
 
     if scores:
-        return max(scores, key=scores.get)
+        return max(scores, key=lambda k: scores[k])
 
     return QueryIntent.EXPLORE
 
@@ -79,7 +79,7 @@ def expand_query(query: str) -> str:
     the embedding captures related concepts.
     """
     text = query.lower()
-    expansions = []
+    expansions: list[str] = []
 
     for term, synonyms in _SYNONYMS.items():
         if len(expansions) >= 3:

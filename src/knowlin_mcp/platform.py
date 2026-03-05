@@ -133,18 +133,11 @@ def spawn_background(
     log_file: Path | None = None,
 ) -> int:
     """Spawn a background process that survives parent exit. Returns PID."""
-    if log_file:
-        log_handle = open(log_file, "a")  # noqa: SIM115
-        stdout = log_handle
-        stderr = log_handle
-    else:
-        log_handle = None
-        stdout = subprocess.DEVNULL
-        stderr = subprocess.DEVNULL
+    log_handle = open(log_file, "a") if log_file else None  # noqa: SIM115
 
     kwargs: dict = {
-        "stdout": stdout,
-        "stderr": stderr,
+        "stdout": log_handle if log_handle else subprocess.DEVNULL,
+        "stderr": log_handle if log_handle else subprocess.DEVNULL,
         "stdin": subprocess.DEVNULL,
     }
 

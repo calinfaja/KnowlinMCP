@@ -77,6 +77,7 @@ class SessionIngester:
         sources_config = load_sources_config(self.db_path)
         sessions_config = (sources_config or {}).get("sessions", {})
 
+        self.sessions_dir: Path | None = None
         if sessions_dir:
             # Explicit arg always wins
             self.sessions_dir = Path(sessions_dir)
@@ -85,8 +86,6 @@ class SessionIngester:
             self.sessions_dir = paths[0] if paths else None
         elif sessions_config.get("auto_discover", True):
             self.sessions_dir = self._find_sessions_dir()
-        else:
-            self.sessions_dir = None
 
         self._registry: dict[str, dict] = self._load_registry()
 
@@ -193,7 +192,7 @@ class SessionIngester:
         Pairs user+assistant messages into turns.
         Scores each turn by importance and filters low-value content.
         """
-        entries = []
+        entries: list[dict[str, Any]] = []
         last_user_text = ""
 
         try:

@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from unittest.mock import patch, MagicMock
-
-import pytest
+from unittest.mock import patch
 
 from knowlin_mcp.capture import (
     create_entry,
@@ -103,7 +100,6 @@ class TestSaveEntry:
         """When server and DB both fail, falls back to JSONL append."""
         kb_dir = tmp_path / ".knowledge-db"
         kb_dir.mkdir()
-        project_path = str(tmp_path)
 
         entry = create_entry("Test fallback save entry content")
 

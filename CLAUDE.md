@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-KnowlinMCP -- hybrid semantic knowledge database with MCP server and multi-source search. Captures, indexes, and retrieves project knowledge using dense embeddings (BGE-small-en-v1.5), sparse matching (BM42), and cross-encoder reranking.
+KnowlinMCP -- hybrid semantic knowledge database with MCP server and multi-source search. Captures, indexes, and retrieves project knowledge using dense embeddings (BGE-small-en-v1.5), sparse matching (SPLADE++), and cross-encoder reranking.
 
 ## Commands
 
@@ -98,7 +98,7 @@ Each sub-store has its own `entries.jsonl`, `embeddings.npy`, `sparse_index.json
 
 Global lazy-loaded models in `db.py`:
 - `_dense_model`: BAAI/bge-small-en-v1.5 (384-dim)
-- `_sparse_model`: Qdrant/bm42-all-minilm-l6-v2-attentions
+- `_sparse_model`: prithivida/Splade_PP_en_v1
 - `_reranker`: Xenova/ms-marco-MiniLM-L-6-v2
 
 First search/embed call is slow (model download); subsequent calls reuse singletons.

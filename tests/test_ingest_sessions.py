@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from knowlin_mcp.ingest_sessions import SessionIngester, _VALUE_SIGNALS, _SKIP_PATTERNS
+from knowlin_mcp.ingest_sessions import SessionIngester
 
 
 @pytest.fixture

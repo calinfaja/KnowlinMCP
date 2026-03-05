@@ -16,6 +16,11 @@ from knowlin_mcp.mcp_server import (
     knowlin_stats,
 )
 
+try:
+    from mcp.server.fastmcp.exceptions import ToolError
+except ImportError:
+    ToolError = Exception  # type: ignore[misc,assignment]
+
 
 @pytest.fixture(autouse=True)
 def reset_project_root():
@@ -126,6 +131,19 @@ class TestKnowlinSearch:
 
     @patch("knowlin_mcp.mcp_server._get_project_root")
     @patch("knowlin_mcp.multi_search.MultiSourceSearch")
+    def test_entry_type_filter(self, mock_mss_cls, mock_root):
+        mock_root.return_value = "/fake/project"
+        mock_mss = MagicMock()
+        mock_mss_cls.return_value = mock_mss
+        mock_mss.search.return_value = []
+
+        knowlin_search("query", entry_type="warning")
+
+        call_kwargs = mock_mss.search.call_args[1]
+        assert call_kwargs["entry_type"] == "warning"
+
+    @patch("knowlin_mcp.mcp_server._get_project_root")
+    @patch("knowlin_mcp.multi_search.MultiSourceSearch")
     def test_long_insight_truncated(self, mock_mss_cls, mock_root):
         mock_root.return_value = "/fake/project"
         mock_mss = MagicMock()
@@ -158,10 +176,10 @@ class TestKnowlinSearch:
             assert call_kwargs["limit"] == 20
 
     @patch("knowlin_mcp.mcp_server._get_project_root", side_effect=RuntimeError("no root"))
-    def test_error_handling(self, _):
-        """Search returns error string when project root not found."""
-        result = knowlin_search("query")
-        assert "Search error" in result
+    def test_error_raises_tool_error(self, _):
+        """Search raises ToolError when project root not found."""
+        with pytest.raises(ToolError, match="Search error"):
+            knowlin_search("query")
 
 
 # --- knowlin_get ---
@@ -218,9 +236,9 @@ class TestKnowlinGet:
         assert mock_db.get.call_count == 3
 
     @patch("knowlin_mcp.mcp_server._get_project_root", side_effect=RuntimeError("no root"))
-    def test_error_handling(self, _):
-        result = knowlin_get("e1")
-        assert "Get error" in result
+    def test_error_raises_tool_error(self, _):
+        with pytest.raises(ToolError, match="Get error"):
+            knowlin_get("e1")
 
 
 # --- knowlin_stats ---
@@ -260,9 +278,9 @@ class TestKnowlinStats:
         assert "**Total entries:** 35" in result
 
     @patch("knowlin_mcp.mcp_server._get_project_root", side_effect=RuntimeError("no root"))
-    def test_error_handling(self, _):
-        result = knowlin_stats()
-        assert "Stats error" in result
+    def test_error_raises_tool_error(self, _):
+        with pytest.raises(ToolError, match="Stats error"):
+            knowlin_stats()
 
 
 # --- knowlin_ingest ---
@@ -312,9 +330,9 @@ class TestKnowlinIngest:
         assert "Invalid source" in result
 
     @patch("knowlin_mcp.mcp_server._get_project_root", side_effect=RuntimeError("no root"))
-    def test_error_handling(self, _):
-        result = knowlin_ingest()
-        assert "Ingest error" in result
+    def test_error_raises_tool_error(self, _):
+        with pytest.raises(ToolError, match="Ingest error"):
+            knowlin_ingest()
 
 
 # --- _format_full_entry ---

@@ -6,9 +6,6 @@ Run with: pytest --integration tests/test_retrieval.py -v
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
 
 from knowlin_mcp.db import KnowledgeDB

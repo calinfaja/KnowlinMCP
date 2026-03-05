@@ -180,7 +180,7 @@ class DocsIngester:
         heading_pattern = re.compile(r"^(#{1,3})\s+(.+)$", re.MULTILINE)
 
         chunks = []
-        heading_stack = {}  # level -> heading text
+        heading_stack: dict[int, str] = {}  # level -> heading text
         last_pos = 0
         last_heading = ""
 

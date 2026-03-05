@@ -17,7 +17,7 @@ Per-project knowledge database with hybrid semantic search, exposed as an MCP se
   |                         |                         |
   v                         v                         v
   Dense Search          Sparse Search           Cross-encoder
-  (BGE-small 384d)      (BM42 attention)        Reranker
+  (BGE-small 384d)      (SPLADE++ sparse)        Reranker
   |                         |                         |
   +------------+------------+                         |
                |                                      |
@@ -170,7 +170,7 @@ results = ms.search("how to configure auth", sources=["kb", "docs"])
   sources.yaml              # source config (optional)
   entries.jsonl              # curated KB (source of truth)
   embeddings.npy             # dense vectors (384-dim)
-  sparse_index.json          # BM42 sparse vectors
+  sparse_index.json          # SPLADE++ sparse vectors
   sessions/                  # ingested session transcripts
     entries.jsonl, embeddings.npy, session-registry.json
   docs/                      # ingested documentation chunks

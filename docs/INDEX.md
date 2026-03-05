@@ -110,7 +110,7 @@ The central class `KnowledgeDB` manages one sub-store's data. Handles JSONL pers
 
 **Module-level singletons:**
 - `_dense_model`: `TextEmbedding("BAAI/bge-small-en-v1.5")` -- 384-dim dense vectors
-- `_sparse_model`: `SparseTextEmbedding("Qdrant/bm42-all-minilm-l6-v2-attentions")` -- learned sparse weights
+- `_sparse_model`: `SparseTextEmbedding("prithivida/Splade_PP_en_v1")` -- learned sparse weights
 - `_reranker`: `TextCrossEncoder("Xenova/ms-marco-MiniLM-L-6-v2")` -- cross-encoder reranking
 - Access via `get_dense_model()`, `get_sparse_model()`, `get_reranker()` (lazy init)
 
@@ -354,7 +354,7 @@ User input
        |       -> Generate dense embedding (fastembed)
        |       -> Append to JSONL
        |       -> Update in-memory numpy array
-       |       -> Generate sparse embedding (BM42)
+       |       -> Generate sparse embedding (SPLADE++)
        |       -> Save index
        |
        +--[3] Direct JSONL append (fallback)
@@ -374,7 +374,7 @@ User query
        +-- For each source (kb, sessions, docs):
        |     -> KnowledgeDB.search()                 [db.py]
        |          -> _dense_search(): cosine similarity on numpy embeddings
-       |          -> _sparse_search(): BM42 sparse dot product
+       |          -> _sparse_search(): SPLADE++ sparse dot product
        |          -> RRF fusion (k=60)
        |          -> Apply filters (date, type, branch)
        |          -> Return ranked results

@@ -6,10 +6,8 @@ that are normally skipped when models aren't loaded.
 
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
 
 from knowlin_mcp.db import KnowledgeDB
@@ -162,7 +160,7 @@ class TestRerankPath:
 
 
 class TestSparseSearchPath:
-    """Test the BM42 sparse search code path with mocked sparse vectors."""
+    """Test the SPLADE++ sparse search code path with mocked sparse vectors."""
 
     def test_sparse_search_with_vectors(self, search_db):
         """Inject fake sparse vectors to exercise the sparse search path."""

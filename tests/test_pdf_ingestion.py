@@ -84,7 +84,7 @@ class TestPDFIngestion:
     def test_pdf_conversion_if_available(self, docs_with_pdf):
         """Test PDF ingestion if pymupdf4llm is available."""
         try:
-            import pymupdf4llm
+            import pymupdf4llm  # noqa: F401
         except ImportError:
             pytest.skip("pymupdf4llm not installed")
 
