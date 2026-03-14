@@ -228,7 +228,7 @@ class CodexIngester:
         # Find JSONL files (recursively through date-nested dirs)
         jsonl_files = sorted(self.codex_dir.rglob("*.jsonl"))
 
-        current_file_keys = {p.name for p in jsonl_files}
+        current_file_keys = {str(p) for p in jsonl_files}
         self._cleanup_deleted_files(current_file_keys)
 
         if not jsonl_files:
@@ -238,7 +238,7 @@ class CodexIngester:
         to_process = []
         file_hashes: dict[str, str] = {}
         for path in jsonl_files:
-            file_key = path.name
+            file_key = str(path)
             if not full:
                 current_hash = self._file_hash(path)
                 file_hashes[file_key] = current_hash
@@ -260,7 +260,7 @@ class CodexIngester:
         db = KnowledgeDB(str(self.project_path), sub_store="sessions")
 
         for path in to_process:
-            old_ids = self._registry.get(path.name, {}).get("entry_ids", [])
+            old_ids = self._registry.get(str(path), {}).get("entry_ids", [])
             if old_ids:
                 db.remove_entries(old_ids)
 
@@ -270,13 +270,14 @@ class CodexIngester:
         for path in to_process:
             entries = self._extract_from_codex_jsonl(path)
             entries.sort(key=lambda x: x.get("_importance_score", 0), reverse=True)
-            file_entry_counts.append((path.name, len(entries)))
+            file_entry_counts.append((str(path), len(entries)))
             all_entries.extend(entries)
 
         if not all_entries:
             for path in to_process:
-                self._registry[path.name] = {
-                    "hash": file_hashes.get(path.name) or self._file_hash(path),
+                fk = str(path)
+                self._registry[fk] = {
+                    "hash": file_hashes.get(fk) or self._file_hash(path),
                     "processed": datetime.now().isoformat(),
                     "entries_extracted": 0,
                     "entry_ids": [],
@@ -293,9 +294,7 @@ class CodexIngester:
         for file_key, count in file_entry_counts:
             file_ids = ids[offset:offset + count] if count > 0 else []
             self._registry[file_key] = {
-                "hash": file_hashes.get(file_key) or self._file_hash(
-                    next(p for p in to_process if p.name == file_key)
-                ),
+                "hash": file_hashes.get(file_key) or self._file_hash(Path(file_key)),
                 "processed": datetime.now().isoformat(),
                 "entries_extracted": count,
                 "entry_ids": file_ids,

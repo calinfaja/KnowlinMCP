@@ -298,9 +298,9 @@ class TestBatchAdd:
 
 
 class TestRemoveEntries:
-    """Tests for remove_entries (soft delete)."""
+    """Tests for remove_entries."""
 
-    def test_remove_zeros_embeddings(self, temp_kb_dir):
+    def test_remove_cleans_up_state(self, temp_kb_dir):
         from knowlin_mcp.db import KnowledgeDB
 
         db = KnowledgeDB(str(temp_kb_dir.parent))
@@ -310,9 +310,9 @@ class TestRemoveEntries:
         removed = db.remove_entries([id2])
 
         assert removed == 1
-        # Embedding should be zeroed
-        row_idx = db._id_to_row[id2]
-        assert np.all(db._embeddings[row_idx] == 0.0)
+        # Entry should be gone from in-memory state
+        assert id2 not in db._id_to_row
+        assert db.get(id2) is None
 
     def test_remove_rewrites_jsonl(self, temp_kb_dir):
         from knowlin_mcp.db import KnowledgeDB

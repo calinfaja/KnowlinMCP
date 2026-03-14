@@ -553,8 +553,11 @@ class TestRegistry:
         assert registry_path.exists()
 
         registry = json.loads(registry_path.read_text())
-        assert "test-session.jsonl" in registry
-        assert "entry_ids" in registry["test-session.jsonl"]
+        # Registry keys are now full paths (not just filenames)
+        assert len(registry) == 1
+        key = next(iter(registry))
+        assert key.endswith("test-session.jsonl")
+        assert "entry_ids" in registry[key]
 
 
 class TestCleanup:

@@ -80,7 +80,27 @@
 
 ## Module Reference
 
-### `db.py` (1050 lines) -- Core Engine
+### `models.py` (99 lines) -- Embedding Model Singletons
+
+Global lazy-loaded model instances shared across all modules. Extracted from `db.py` to centralize model management.
+
+**Constants:**
+- `MODEL_NAMES`: Dict mapping model roles to model IDs
+
+**Module-level singletons:**
+- `_dense_model`: `TextEmbedding("BAAI/bge-small-en-v1.5")` -- 384-dim dense vectors
+- `_sparse_model`: `SparseTextEmbedding("prithivida/Splade_PP_en_v1")` -- learned sparse weights
+- `_reranker`: `TextCrossEncoder("Xenova/ms-marco-MiniLM-L-6-v2")` -- cross-encoder reranking
+
+**Accessor functions:**
+- `get_dense_model()` -- lazy-init and return dense embedding model
+- `get_sparse_model()` -- lazy-init and return sparse embedding model
+- `get_reranker()` -- lazy-init and return cross-encoder reranker
+- `_warn_if_first_run()` -- one-time stderr warning about model download
+
+---
+
+### `db.py` (1002 lines) -- Core Engine
 
 The central class `KnowledgeDB` manages one sub-store's data. Handles JSONL persistence, dense/sparse embedding, RRF fusion, and cross-encoder reranking.
 
@@ -108,11 +128,7 @@ The central class `KnowledgeDB` manages one sub-store's data. Handles JSONL pers
 | `get_related` | `(entry_id, limit) -> list` | Find related entries by similarity |
 | `add_structured` | `(data) -> str` | Add from structured dict (validates schema) |
 
-**Module-level singletons:**
-- `_dense_model`: `TextEmbedding("BAAI/bge-small-en-v1.5")` -- 384-dim dense vectors
-- `_sparse_model`: `SparseTextEmbedding("prithivida/Splade_PP_en_v1")` -- learned sparse weights
-- `_reranker`: `TextCrossEncoder("Xenova/ms-marco-MiniLM-L-6-v2")` -- cross-encoder reranking
-- Access via `get_dense_model()`, `get_sparse_model()`, `get_reranker()` (lazy init)
+**Models:** Accessed via `models.py` singletons (`get_dense_model()`, `get_sparse_model()`, `get_reranker()`). `KnowledgeDB` exposes them as properties: `dense_model`, `sparse_model`, `reranker`.
 
 **Search internals:**
 - `_dense_search(query, limit)`: Cosine similarity on numpy array
@@ -123,7 +139,7 @@ The central class `KnowledgeDB` manages one sub-store's data. Handles JSONL pers
 
 ---
 
-### `multi_search.py` (177 lines) -- Cross-Source Orchestrator
+### `multi_search.py` (190 lines) -- Cross-Source Orchestrator
 
 **Class: `MultiSourceSearch`**
 - Constructor: `MultiSourceSearch(project_path)`
@@ -192,7 +208,27 @@ Pipeline:
 
 ---
 
-### `search.py` (135 lines) -- Output Formatting
+### `mcp_server.py` (262 lines) -- MCP Server
+
+FastMCP server exposing tools via stdio transport for MCP-compatible clients.
+
+**Tools exposed:**
+- `knowlin_search` -- multi-source search with filters and formatting
+- `knowlin_get` -- fetch single entry by ID
+- `knowlin_stats` -- database statistics
+- `knowlin_ingest` -- trigger bulk ingestion
+
+**Functions:**
+- `_get_project_root()` -- resolve project root from `KNOWLIN_PROJECT` env or CWD
+- `_parse_sources(sources_str)` -- parse comma-separated source filter
+- `main()` -- entry point (`knowlin-mcp` script)
+
+**Constants:**
+- `_READ_ONLY`, `_WRITE` -- permission annotations for tool categorization
+
+---
+
+### `search.py` (141 lines) -- Output Formatting
 
 **Formatters** (registered in `FORMATTERS` dict):
 
@@ -229,7 +265,7 @@ Pipeline:
 
 ---
 
-### `ingest_docs.py` (512 lines) -- Document Ingestion
+### `ingest_docs.py` (515 lines) -- Document Ingestion
 
 **Class: `DocsIngester`**
 - Constructor: `DocsIngester(project_path, docs_path=None)`
@@ -253,7 +289,7 @@ Pipeline:
 
 ---
 
-### `ingest_sessions.py` (422 lines) -- Session Transcript Ingestion
+### `ingest_sessions.py` (507 lines) -- Session Transcript Ingestion
 
 **Class: `SessionIngester`**
 - Constructor: `SessionIngester(project_path, sessions_dir=None)`
@@ -273,7 +309,29 @@ Pipeline:
 
 ---
 
-### `cli.py` (673 lines) -- CLI Interface
+### `ingest_codex.py` (307 lines) -- Codex CLI Session Ingestion
+
+**Class: `CodexIngester`**
+- Constructor: `CodexIngester(project_path, codex_dir=None)`
+- Auto-discovers Codex CLI sessions from `~/.codex/`
+- Extracts assistant messages from Codex JSONL transcripts
+
+**Key methods:**
+- `_find_codex_dir()` -- locate Codex session directory
+- `_extract_from_codex_jsonl(path)` -- parse Codex JSONL format
+- `_extract_assistant_text(msg)` -- extract text content from assistant messages
+- `_extract_date(path)` -- derive session date from file metadata
+- `_cleanup_deleted_files()` -- remove entries from deleted session files
+
+**Key method:** `ingest(full=False) -> int`
+- Scans Codex JSONL files, extracts assistant messages
+- Creates entries with session metadata
+- Registry: `codex-registry.json`
+- Same incremental pattern as `SessionIngester`
+
+---
+
+### `cli.py` (765 lines) -- CLI Interface
 
 Click-based CLI with `knowlin` entry point.
 
@@ -281,7 +339,7 @@ Click-based CLI with `knowlin` entry point.
 - `knowlin search` -- search with multi-source, filters, formatters
 - `knowlin capture` -- create entries (text or JSON input)
 - `knowlin server {start|stop|status}` -- daemon management
-- `knowlin ingest {sessions|docs|all}` -- bulk ingestion
+- `knowlin ingest {sessions|codex|docs|all}` -- bulk ingestion
 - `knowlin stats [--json]` -- database statistics
 - `knowlin rebuild [--dense-only]` -- rebuild search index
 - `knowlin doctor [--fix]` -- health check and repair
@@ -405,13 +463,24 @@ knowlin ingest all
   |     -> Save updated registry
   |
   +-- SessionIngester.ingest()                       [ingest_sessions.py]
-        -> Load session-registry.json
-        -> Find JSONL files in sessions dir
-        -> For each session file:
+  |     -> Load session-registry.json
+  |     -> Find JSONL files in sessions dir
+  |     -> For each session file:
+  |          -> SHA-256 hash check vs registry
+  |          -> _extract_from_jsonl(): parse messages
+  |          -> _score_content(): rate by value signals
+  |          -> Keep high-scoring messages
+  |          -> KnowledgeDB(sub_store="sessions").batch_add(entries)
+  |     -> _cleanup_deleted_files()
+  |     -> Save updated registry
+  |
+  +-- CodexIngester.ingest()                         [ingest_codex.py]
+        -> Load codex-registry.json
+        -> Find JSONL files in ~/.codex/
+        -> For each Codex session file:
              -> SHA-256 hash check vs registry
-             -> _extract_from_jsonl(): parse messages
-             -> _score_content(): rate by value signals
-             -> Keep high-scoring messages
+             -> _extract_from_codex_jsonl(): parse Codex format
+             -> _extract_assistant_text(): get assistant content
              -> KnowledgeDB(sub_store="sessions").batch_add(entries)
         -> _cleanup_deleted_files()
         -> Save updated registry
@@ -494,7 +563,7 @@ sessions:
 
 ## Test Architecture
 
-### Test Files (15 files)
+### Test Files (17 files)
 
 | Test File | Tests | Focus |
 |-----------|-------|-------|
@@ -507,6 +576,8 @@ sessions:
 | `test_query_utils.py` | Query processing | Intent classification, expansion |
 | `test_ingest_docs.py` | Doc ingestion | Chunking, registry, incremental |
 | `test_ingest_sessions.py` | Session ingestion | JSONL extraction, scoring |
+| `test_ingest_codex.py` | Codex ingestion | Codex JSONL extraction, registry |
+| `test_mcp_server.py` | MCP server | FastMCP tool handlers |
 | `test_server.py` | TCP server | Server lifecycle, commands |
 | `test_integrity.py` | Data integrity | Schema validation, corruption recovery |
 | `test_properties.py` | Property-based | Hypothesis fuzz tests |
@@ -541,6 +612,7 @@ cli.py
   -> server.py (KnowledgeServer, list_running_servers)
   -> ingest_docs.py (DocsIngester)
   -> ingest_sessions.py (SessionIngester)
+  -> ingest_codex.py (CodexIngester)
   -> platform.py (find_project_root)
   -> utils.py (debug_log, is_server_running)
 
@@ -562,14 +634,22 @@ ingest_sessions.py
   -> ingest_docs.py (load_sources_config, _resolve_paths)
   -> utils.py (debug_log)
 
+ingest_codex.py
+  -> db.py (KnowledgeDB)
+  -> utils.py (debug_log)
+
 server.py
   -> db.py (KnowledgeDB)
   -> platform.py (find_project_root, get_runtime_dir, ...)
   -> utils.py (debug_log)
 
 db.py
+  -> models.py (get_dense_model, get_sparse_model, get_reranker)
   -> utils.py (debug_log, migrate_entry, SCHEMA_V3_DEFAULTS)
   -> platform.py (find_project_root)
+
+models.py
+  -> (fastembed: TextEmbedding, SparseTextEmbedding, TextCrossEncoder)
 
 utils.py
   -> platform.py (HOST, KB_DIR_NAME, get_kb_pid_file, get_kb_port_file)
@@ -578,10 +658,10 @@ utils.py
 ### Dependency Layers
 
 ```
-Layer 0 (no internal deps):  platform.py
+Layer 0 (no internal deps):  platform.py, models.py
 Layer 1:                      utils.py, query_utils.py
 Layer 2:                      db.py, search.py
 Layer 3:                      multi_search.py, capture.py, server.py
-Layer 4:                      ingest_docs.py, ingest_sessions.py
-Layer 5 (top):                cli.py
+Layer 4:                      ingest_docs.py, ingest_sessions.py, ingest_codex.py
+Layer 5 (top):                cli.py, mcp_server.py
 ```

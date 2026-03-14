@@ -486,19 +486,19 @@ class KnowledgeDB:
             except Exception as e:
                 debug_log(f"Batch sparse embedding failed: {e}")
 
-        self._save_index()
-
-        # Append to JSONL
+        # Write JSONL first (source of truth), then save index
         with open(self.jsonl_path, "a") as f:
             for entry in valid_entries:
                 f.write(json.dumps(entry) + "\n")
 
+        self._save_index()
+
         return ids
 
     def remove_entries(self, entry_ids: list[str]) -> int:
-        """Soft-delete entries by zeroing their embeddings.
+        """Remove entries and rebuild in-memory state.
 
-        Use rebuild() to compact after removal.
+        Use rebuild() to compact embeddings after removal.
         """
         if not entry_ids:
             return 0
@@ -516,6 +516,15 @@ class KnowledgeDB:
                 removed += 1
 
         if removed > 0:
+            # Clean in-memory state so get()/add() stay consistent
+            for eid in id_set:
+                row_idx = self._id_to_row.pop(eid, None)
+                if row_idx is not None:
+                    self._row_to_id.pop(row_idx, None)
+            self._entries = [
+                e for e in self._entries if e.get("id") not in id_set
+            ]
+
             self._save_index()
 
             # Rewrite JSONL without removed entries

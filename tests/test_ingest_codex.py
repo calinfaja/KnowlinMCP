@@ -344,8 +344,11 @@ class TestCodexRegistry:
         assert registry_path.exists()
 
         registry = json.loads(registry_path.read_text())
-        assert "rollout-abc123.jsonl" in registry
-        assert "entry_ids" in registry["rollout-abc123.jsonl"]
+        # Registry keys are now full paths (not just filenames)
+        assert len(registry) == 1
+        key = next(iter(registry))
+        assert key.endswith("rollout-abc123.jsonl")
+        assert "entry_ids" in registry[key]
 
 
 class TestCodexCleanup:
