@@ -111,6 +111,7 @@ class KnowledgeServer:
 
         self.port = 0
         self.db: Any = None
+        self.ms: Any = None  # Cached MultiSourceSearch
         self.running = False
         self.load_time = 0.0
         self.last_activity = time.time()
@@ -132,6 +133,10 @@ class KnowledgeServer:
         from knowlin_mcp.db import KnowledgeDB
 
         self.db = KnowledgeDB(str(self.project_root))
+
+        from knowlin_mcp.multi_search import MultiSourceSearch
+
+        self.ms = MultiSourceSearch(str(self.project_root))
         self.load_time = time.time() - start
         count = self.db.count()
         print(f"Index loaded in {self.load_time:.2f}s ({count} entries)")
@@ -190,8 +195,7 @@ class KnowledgeServer:
 
                 # Multi-source search
                 if sources and len(sources) > 1:
-                    from knowlin_mcp.multi_search import MultiSourceSearch
-                    ms = MultiSourceSearch(str(self.project_root))
+                    ms = self.ms
                     results = ms.search(
                         query, sources=sources, limit=limit,
                         date_from=date_from, date_to=date_to,

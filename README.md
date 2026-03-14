@@ -46,15 +46,27 @@ pip install -e ".[mcp]"
 ## Quick Start (30 seconds)
 
 ```bash
+# Activate the venv (or add .venv/bin to your PATH)
+source .venv/bin/activate
+
 # 1. Initialize in your project
 cd /your/project
 knowlin init                    # creates .knowledge-db/ + .mcp.json
 
 # 2. Index your docs
 knowlin ingest all              # indexes docs/ and Claude sessions
+                                # First run downloads ~200MB of ML models
 
 # 3. Search
 knowlin search "authentication"
+```
+
+Example output:
+```
+1. [kb:warning] JWT tokens must be validated server-side (87%, 2026-01-10)
+   Client-side JWT validation is bypassable; always verify on the server.
+2. [docs:finding] OAuth2 PKCE flow for single-page apps (72%, 2026-02-15)
+   Use PKCE instead of implicit grant for browser-based OAuth2 flows.
 ```
 
 That's it. Claude Code (and other MCP clients) can now use `knowlin_search` automatically via the `.mcp.json` created by `init`.
@@ -93,7 +105,12 @@ knowlin ingest docs             # docs only
 knowlin ingest sessions         # sessions only
 knowlin ingest all --full       # force re-process everything
 
-# Manage
+# Browse & manage
+knowlin list                    # recent entries across all sources
+knowlin get <id>                # full details of an entry
+knowlin delete <id>             # remove an entry
+
+# Admin
 knowlin init                    # set up project (.knowledge-db/ + .mcp.json)
 knowlin stats                   # entry counts per source
 knowlin doctor --fix            # health check and auto-repair
@@ -102,6 +119,10 @@ knowlin server start            # TCP server for ~30ms queries (foreground)
 ```
 
 Entry types: `finding`, `solution`, `pattern`, `warning`, `decision`, `discovery`
+
+**Environment variables:**
+- `CLAUDE_PROJECT_DIR` -- override project root detection (useful in CI or nested subdirs)
+- `KNOWLIN_DEBUG` -- enable debug logging to stderr
 
 ## Source Configuration
 

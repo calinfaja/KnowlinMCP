@@ -359,6 +359,129 @@ def stats(json_output, project):
 
 
 # =============================================================================
+# list
+# =============================================================================
+
+
+@main.command("list")
+@click.option("--limit", "-n", default=10, help="Number of entries to show")
+@click.option("--source", "-s", multiple=True, help="Source: kb, sessions, docs")
+@click.option("--project", "-p", help="Project path")
+def list_entries(limit, source, project):
+    """List recent knowledge entries."""
+    from knowlin_mcp.db import KnowledgeDB
+
+    root = _resolve_project(project)
+    sources = list(source) if source else [None, "sessions", "docs"]
+
+    entries = []
+    for sub in sources:
+        label = sub or "kb"
+        try:
+            db = KnowledgeDB(str(root), sub_store=sub)
+            for e in db.list_recent(limit=limit):
+                e["_source"] = label
+                entries.append(e)
+        except Exception:
+            pass
+
+    # Sort by date descending, take top N
+    entries.sort(
+        key=lambda x: (x.get("date", "") or "", x.get("timestamp", "") or ""),
+        reverse=True,
+    )
+    entries = entries[:limit]
+
+    if not entries:
+        console.print("[dim]No entries found.[/dim]")
+        return
+
+    for e in entries:
+        src = e.get("_source", "?")
+        title = e.get("title", "Untitled")
+        date = (e.get("date") or "")[:10]
+        etype = e.get("type", "")
+        eid = e.get("id", "")[:12]
+        console.print(f"  [{src}] {title}  [dim]{etype} | {date} | {eid}[/dim]")
+
+
+# =============================================================================
+# get
+# =============================================================================
+
+
+@main.command()
+@click.argument("entry_id")
+@click.option("--project", "-p", help="Project path")
+def get(entry_id, project):
+    """Get full details of a knowledge entry by ID."""
+    from knowlin_mcp.db import KnowledgeDB
+
+    root = _resolve_project(project)
+
+    for sub in (None, "sessions", "docs"):
+        try:
+            db = KnowledgeDB(str(root), sub_store=sub)
+            entry = db.get(entry_id)
+            if entry:
+                source = sub or "kb"
+                console.print(f"\n[bold]{entry.get('title', 'Untitled')}[/bold]")
+                console.print(
+                    f"[dim]{source} | {entry.get('type', '')} | "
+                    f"{(entry.get('date') or '')[:10]} | {entry.get('id', '')}[/dim]"
+                )
+                console.print()
+                insight = entry.get("insight") or entry.get("summary") or ""
+                if insight:
+                    console.print(insight)
+                kw = entry.get("keywords") or entry.get("tags")
+                if kw:
+                    console.print(f"\n[dim]Keywords: {', '.join(kw)}[/dim]")
+                return
+        except Exception:
+            pass
+
+    console.print(f"[red]Entry not found: {entry_id}[/red]")
+    raise SystemExit(1)
+
+
+# =============================================================================
+# delete
+# =============================================================================
+
+
+@main.command()
+@click.argument("entry_id")
+@click.option("--source", "-s", default=None, help="Source: kb, sessions, docs")
+@click.option("--project", "-p", help="Project path")
+def delete(entry_id, source, project):
+    """Delete a knowledge entry by ID."""
+    from knowlin_mcp.db import KnowledgeDB
+
+    root = _resolve_project(project)
+
+    # If source specified, only look there
+    stores = [source] if source else [None, "sessions", "docs"]
+
+    for sub in stores:
+        try:
+            db = KnowledgeDB(str(root), sub_store=sub)
+            entry = db.get(entry_id)
+            if entry:
+                label = sub or "kb"
+                title = entry.get("title", "Untitled")
+                removed = db.remove_entries([entry_id])
+                if removed:
+                    console.print(f"Deleted from {label}: {title}")
+                    return
+        except Exception:
+            pass
+
+    console.print(f"[red]Entry not found: {entry_id}[/red]")
+    raise SystemExit(1)
+
+
+# =============================================================================
 # rebuild
 # =============================================================================
 

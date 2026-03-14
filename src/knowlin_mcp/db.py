@@ -44,6 +44,9 @@ class KnowledgeDB:
 
     RRF_K = 60
     MAX_PINNED = 15
+    DEDUP_THRESHOLD = 0.92
+    SPARSE_MIN_WEIGHT = 0.01
+    PINNED_BOOST = 1.3
 
     def __init__(self, project_path: str | None = None, sub_store: str | None = None):
         """Initialize KnowledgeDB.
@@ -254,7 +257,7 @@ class KnowledgeDB:
             sparse_emb = embeddings[0]
             result = {}
             for idx, val in zip(sparse_emb.indices, sparse_emb.values):
-                if val > 0.01:
+                if val > self.SPARSE_MIN_WEIGHT:
                     result[str(idx)] = float(val)
             return result
         except Exception as e:
@@ -346,7 +349,7 @@ class KnowledgeDB:
             query = f"{entry.get('title', '')} {entry.get('insight', entry.get('summary', ''))}"
             try:
                 similar = self.search(query, limit=1, rerank=False)
-                if similar and similar[0].get("score", 0) > 0.92:
+                if similar and similar[0].get("score", 0) > self.DEDUP_THRESHOLD:
                     existing_id = similar[0].get("id")
                     debug_log(
                         f"Duplicate detected (score={similar[0]['score']:.2f}): "
@@ -479,7 +482,7 @@ class KnowledgeDB:
                     row_idx = base_row + i
                     vec = {}
                     for idx, val in zip(sparse_emb.indices, sparse_emb.values):
-                        if val > 0.01:
+                        if val > self.SPARSE_MIN_WEIGHT:
                             vec[str(idx)] = float(val)
                     if vec:
                         self._sparse_vectors[row_idx] = vec
@@ -602,7 +605,7 @@ class KnowledgeDB:
         # Boost pinned entries
         for r in results:
             if r.get("pinned"):
-                r["score"] *= 1.3
+                r["score"] *= self.PINNED_BOOST
 
         # Post-RRF filtering
         if date_from:
@@ -751,7 +754,7 @@ class KnowledgeDB:
                         global_idx = batch_start + local_idx
                         vec = {}
                         for token_idx, val in zip(sparse_emb.indices, sparse_emb.values):
-                            if val > 0.01:
+                            if val > self.SPARSE_MIN_WEIGHT:
                                 vec[str(token_idx)] = float(val)
                         if vec:
                             self._sparse_vectors[global_idx] = vec
