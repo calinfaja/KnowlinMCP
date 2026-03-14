@@ -5,8 +5,8 @@ Entry point: knowlin
 
 from __future__ import annotations
 
+import importlib
 import json
-import sys
 from pathlib import Path
 
 import click
@@ -686,8 +686,9 @@ def ingest_sessions(full, project):
 
     from knowlin_mcp.ingest_sessions import SessionIngester
 
-    ingester = SessionIngester(str(root))
-    count = ingester.ingest(full=full)
+    with console.status("[bold]Ingesting sessions...[/bold]"):
+        ingester = SessionIngester(str(root))
+        count = ingester.ingest(full=full)
     console.print(f"Ingested {count} entries from sessions")
 
 
@@ -700,8 +701,9 @@ def ingest_codex(full, project):
 
     from knowlin_mcp.ingest_codex import CodexIngester
 
-    ingester = CodexIngester(str(root))
-    count = ingester.ingest(full=full)
+    with console.status("[bold]Ingesting Codex sessions...[/bold]"):
+        ingester = CodexIngester(str(root))
+        count = ingester.ingest(full=full)
     console.print(f"Ingested {count} entries from Codex sessions")
 
 
@@ -715,8 +717,9 @@ def ingest_docs(docs_path, full, project):
 
     from knowlin_mcp.ingest_docs import DocsIngester
 
-    ingester = DocsIngester(str(root), docs_path=docs_path)
-    count = ingester.ingest(full=full)
+    with console.status("[bold]Ingesting docs...[/bold]"):
+        ingester = DocsIngester(str(root), docs_path=docs_path)
+        count = ingester.ingest(full=full)
     console.print(f"Ingested {count} entries from docs")
 
 
@@ -728,37 +731,25 @@ def ingest_all(full, project):
     root = _resolve_project(project)
     total = 0
 
-    from knowlin_mcp.ingest_sessions import SessionIngester
+    sources = [
+        ("Sessions", "knowlin_mcp.ingest_sessions", "SessionIngester"),
+        ("Codex", "knowlin_mcp.ingest_codex", "CodexIngester"),
+        ("Docs", "knowlin_mcp.ingest_docs", "DocsIngester"),
+    ]
 
-    try:
-        ingester = SessionIngester(str(root))
-        count = ingester.ingest(full=full)
-        console.print(f"Sessions: {count} entries")
-        total += count
-    except Exception as e:
-        console.print(f"[yellow]Sessions skipped: {e}[/yellow]")
+    for label, module_name, class_name in sources:
+        try:
+            mod = importlib.import_module(module_name)
+            cls = getattr(mod, class_name)
+            with console.status(f"[bold]Ingesting {label.lower()}...[/bold]"):
+                ingester = cls(str(root))
+                count = ingester.ingest(full=full)
+            console.print(f"  {label}: {count} entries")
+            total += count
+        except Exception as e:
+            console.print(f"  [yellow]{label} skipped: {e}[/yellow]")
 
-    from knowlin_mcp.ingest_codex import CodexIngester
-
-    try:
-        ingester = CodexIngester(str(root))
-        count = ingester.ingest(full=full)
-        console.print(f"Codex: {count} entries")
-        total += count
-    except Exception as e:
-        console.print(f"[yellow]Codex skipped: {e}[/yellow]")
-
-    from knowlin_mcp.ingest_docs import DocsIngester
-
-    try:
-        ingester = DocsIngester(str(root))
-        count = ingester.ingest(full=full)
-        console.print(f"Docs: {count} entries")
-        total += count
-    except Exception as e:
-        console.print(f"[yellow]Docs skipped: {e}[/yellow]")
-
-    console.print(f"Total: {total} entries ingested")
+    console.print(f"\nTotal: {total} entries ingested")
 
 
 # =============================================================================

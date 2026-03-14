@@ -283,6 +283,17 @@ def clean_stale_socket(project_path: str | Path) -> bool:
 # =============================================================================
 
 
+def recv_all(sock: socket.socket) -> bytes:
+    """Read all data from a socket until EOF. Shared by all TCP callers."""
+    chunks = []
+    while True:
+        chunk = sock.recv(65536)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def send_command(
     project_path: str | Path, cmd_data: dict, timeout: float = 5.0
 ) -> dict | None:
@@ -297,13 +308,7 @@ def send_command(
             sock.connect((HOST, port))
             sock.sendall(json.dumps(cmd_data).encode("utf-8"))
             sock.shutdown(socket.SHUT_WR)
-            chunks = []
-            while True:
-                chunk = sock.recv(65536)
-                if not chunk:
-                    break
-                chunks.append(chunk)
-            return json.loads(b"".join(chunks).decode("utf-8"))
+            return json.loads(recv_all(sock).decode("utf-8"))
     except Exception as e:
         debug_log(f"Send command failed: {e}")
         return None

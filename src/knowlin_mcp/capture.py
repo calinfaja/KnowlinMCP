@@ -11,7 +11,6 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from knowlin_mcp.platform import HOST, get_kb_port_file
 from knowlin_mcp.utils import debug_log, infer_type
 
 
@@ -121,64 +120,28 @@ def create_entry_from_json(data: dict) -> dict:
 
 def send_entry_to_server(entry: dict, project_path: str) -> bool:
     """Send entry to running KB server via TCP (preferred method)."""
-    import socket
+    from knowlin_mcp.utils import send_command
 
-    port_file = get_kb_port_file(Path(project_path))
-    if not port_file.exists():
-        debug_log("KB server not running (no port file)")
+    result = send_command(project_path, {"cmd": "add", "entry": entry})
+    if result is None:
+        debug_log("KB server not reachable")
         return False
-
-    try:
-        port = int(port_file.read_text().strip())
-    except (ValueError, OSError):
-        debug_log("Invalid port file")
-        return False
-
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(5.0)
-            sock.connect((HOST, port))
-            sock.sendall(json.dumps({"cmd": "add", "entry": entry}).encode("utf-8"))
-            sock.shutdown(socket.SHUT_WR)
-            chunks = []
-            while True:
-                chunk = sock.recv(65536)
-                if not chunk:
-                    break
-                chunks.append(chunk)
-            response = b"".join(chunks).decode("utf-8")
-
-        result = json.loads(response)
-        if result.get("status") == "ok":
-            debug_log(f"Entry added via server: {result.get('id')}")
-            return True
-        else:
-            debug_log(f"Server rejected entry: {result.get('error')}")
-            return False
-    except Exception as e:
-        debug_log(f"Failed to send to server: {e}")
-        return False
+    if result.get("status") == "ok":
+        debug_log(f"Entry added via server: {result.get('id')}")
+        return True
+    debug_log(f"Server rejected entry: {result.get('error')}")
+    return False
 
 
 def _notify_server_reload(project_path: str) -> None:
     """Send reload command to running KB server (best-effort)."""
-    import socket
+    from knowlin_mcp.utils import send_command
 
-    port_file = get_kb_port_file(Path(project_path))
-    if not port_file.exists():
-        return
-
-    try:
-        port = int(port_file.read_text().strip())
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(5.0)
-            sock.connect((HOST, port))
-            sock.sendall(json.dumps({"cmd": "reload"}).encode("utf-8"))
-            sock.shutdown(socket.SHUT_WR)
-            sock.recv(4096)
+    result = send_command(project_path, {"cmd": "reload"})
+    if result:
         debug_log("Notified server to reload index")
-    except Exception as e:
-        debug_log(f"Server reload notification failed (non-fatal): {e}")
+    else:
+        debug_log("Server reload notification failed (non-fatal)")
 
 
 def save_entry(entry: dict, knowledge_dir: Path) -> bool:

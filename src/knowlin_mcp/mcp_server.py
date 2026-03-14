@@ -290,7 +290,7 @@ def knowlin_capture(
 
         valid_priorities = {"low", "medium", "high", "critical"}
         if priority not in valid_priorities:
-            return f"Invalid priority: {priority}. Use one of: {', '.join(sorted(valid_priorities))}"
+            return f"Invalid priority: {priority}. Use: {', '.join(sorted(valid_priorities))}"
 
         kw_list = [k.strip() for k in keywords.split(",") if k.strip()] if keywords else []
 

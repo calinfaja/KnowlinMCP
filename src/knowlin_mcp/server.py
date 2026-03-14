@@ -165,12 +165,14 @@ class KnowledgeServer:
             conn.settimeout(30.0)
             # Read until EOF (client must shutdown(SHUT_WR) after sending)
             chunks = []
+            total_size = 0
             while True:
                 chunk = conn.recv(65536)
                 if not chunk:
                     break
                 chunks.append(chunk)
-                if len(b"".join(chunks)) > 1024 * 1024:  # 1 MiB cap
+                total_size += len(chunk)
+                if total_size > 1024 * 1024:  # 1 MiB cap
                     conn.sendall(json.dumps({"error": "Request too large"}).encode())
                     return
             data = b"".join(chunks).decode("utf-8")
@@ -460,20 +462,15 @@ def send_command_to_port(
     port: int, cmd_data: dict, timeout: float = 5.0
 ) -> dict | None:
     """Send command to server on specified port."""
+    from knowlin_mcp.utils import recv_all
+
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
             client.settimeout(timeout)
             client.connect((HOST, port))
             client.sendall(json.dumps(cmd_data).encode("utf-8"))
-            client.shutdown(socket.SHUT_WR)  # signal end of request
-            # Read until EOF
-            chunks = []
-            while True:
-                chunk = client.recv(65536)
-                if not chunk:
-                    break
-                chunks.append(chunk)
-            return json.loads(b"".join(chunks).decode("utf-8"))
+            client.shutdown(socket.SHUT_WR)
+            return json.loads(recv_all(client).decode("utf-8"))
     except Exception as e:
         return {"error": str(e)}
 
