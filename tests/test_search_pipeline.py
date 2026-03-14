@@ -164,9 +164,10 @@ class TestSparseSearchPath:
 
     def test_sparse_search_with_vectors(self, search_db):
         """Inject fake sparse vectors to exercise the sparse search path."""
-        # Add fake sparse vectors for all entries
+        # Add fake sparse vectors for all entries and rebuild inverted index
         for row_idx in range(len(search_db._entries)):
             search_db._sparse_vectors[row_idx] = {"1": 0.5, "2": 0.3, "3": 0.8}
+        search_db._rebuild_inverted_index()
 
         # Mock sparse model to return a query vector
         mock_sparse = MagicMock()

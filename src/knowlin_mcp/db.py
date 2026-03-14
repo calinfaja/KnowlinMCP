@@ -103,6 +103,7 @@ class KnowledgeDB:
         self._row_to_id: dict[int, str] = {}
         self._entries: list[dict[str, Any]] = []
         self._sparse_vectors: dict[int, dict[str, float]] = {}
+        self._inverted_index: dict[str, list[tuple[int, float]]] = {}
 
         self._load_index()
 
@@ -193,6 +194,8 @@ class KnowledgeDB:
                     debug_log(f"Repaired index: {len(self._id_to_row)} entries now indexed")
                 else:
                     debug_log(f"Loaded {len(self._id_to_row)} embeddings from disk")
+
+                self._rebuild_inverted_index()
             except Exception as e:
                 debug_log(f"Failed to load index: {e}")
                 self._embeddings = None
@@ -200,6 +203,7 @@ class KnowledgeDB:
                 self._row_to_id = {}
                 self._entries = []
                 self._sparse_vectors = {}
+                self._inverted_index = {}
 
     def _save_index(self) -> None:
         """Save embeddings, sparse vectors, and index to disk."""
@@ -281,6 +285,26 @@ class KnowledgeDB:
             debug_log(f"Sparse embedding failed: {e}")
             return {}
 
+    def _rebuild_inverted_index(self) -> None:
+        """Build inverted index from _sparse_vectors for sub-linear search."""
+        self._inverted_index = {}
+        for row_idx, doc_vec in self._sparse_vectors.items():
+            for token, weight in doc_vec.items():
+                posting = self._inverted_index.get(token)
+                if posting is None:
+                    self._inverted_index[token] = [(row_idx, weight)]
+                else:
+                    posting.append((row_idx, weight))
+
+    def _index_sparse_row(self, row_idx: int, sparse_vec: dict[str, float]) -> None:
+        """Add a single document's sparse vector to the inverted index."""
+        for token, weight in sparse_vec.items():
+            posting = self._inverted_index.get(token)
+            if posting is None:
+                self._inverted_index[token] = [(row_idx, weight)]
+            else:
+                posting.append((row_idx, weight))
+
     def _dense_search(self, query: str, limit: int) -> list[tuple]:
         """Dense (semantic) search using cosine similarity."""
         if self._embeddings is None or len(self._embeddings) == 0:
@@ -292,24 +316,26 @@ class KnowledgeDB:
         return [(int(idx), float(scores[idx])) for idx in top_indices]
 
     def _sparse_search(self, query: str, limit: int) -> list[tuple]:
-        """Sparse (keyword) search using SPLADE++."""
-        if not self._sparse_vectors:
+        """Sparse (keyword) search using SPLADE++ inverted index."""
+        if not self._inverted_index:
             return []
 
         query_sparse = self._generate_sparse_embedding(query)
         if not query_sparse:
             return []
 
-        scores = []
-        for row_idx, doc_sparse in self._sparse_vectors.items():
-            score = 0.0
-            for token, q_weight in query_sparse.items():
-                if token in doc_sparse:
-                    score += q_weight * doc_sparse[token]
-            if score > 0:
-                scores.append((row_idx, score))
+        # Accumulate scores by traversing posting lists (sub-linear in corpus size)
+        acc: dict[int, float] = {}
+        for token, q_weight in query_sparse.items():
+            posting = self._inverted_index.get(token)
+            if posting:
+                for doc_idx, d_weight in posting:
+                    acc[doc_idx] = acc.get(doc_idx, 0.0) + q_weight * d_weight
 
-        scores.sort(key=lambda x: x[1], reverse=True)
+        if not acc:
+            return []
+
+        scores = sorted(acc.items(), key=lambda x: x[1], reverse=True)
         return scores[:limit]
 
     def _rerank_results(
@@ -417,6 +443,7 @@ class KnowledgeDB:
         sparse_vec = self._generate_sparse_embedding(searchable_text)
         if sparse_vec:
             self._sparse_vectors[row_idx] = sparse_vec
+            self._index_sparse_row(row_idx, sparse_vec)
 
         self._save_index()
 
@@ -502,6 +529,7 @@ class KnowledgeDB:
                             vec[str(idx)] = float(val)
                     if vec:
                         self._sparse_vectors[row_idx] = vec
+                        self._index_sparse_row(row_idx, vec)
             except Exception as e:
                 debug_log(f"Batch sparse embedding failed: {e}")
 
@@ -543,6 +571,7 @@ class KnowledgeDB:
             self._entries = [
                 e for e in self._entries if e.get("id") not in id_set
             ]
+            self._rebuild_inverted_index()
 
             self._save_index()
 
@@ -761,6 +790,7 @@ class KnowledgeDB:
             self._id_to_row[entry["id"]] = idx
             self._row_to_id[idx] = entry["id"]
 
+        self._rebuild_inverted_index()
         self._save_index()
 
         if self.old_txtai_path.exists():

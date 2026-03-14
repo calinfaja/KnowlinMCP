@@ -359,6 +359,50 @@ def stats(json_output, project):
 
 
 # =============================================================================
+# export
+# =============================================================================
+
+
+@main.command()
+@click.option("--source", "-s", multiple=True, help="Sources to export (kb, sessions, docs)")
+@click.option(
+    "--format", "-f", "fmt",
+    type=click.Choice(["jsonl", "json"]),
+    default="jsonl",
+    help="Output format",
+)
+@click.option("--output", "-o", type=click.Path(), default=None, help="Output file path")
+@click.option("--project", "-p", help="Project path")
+def export(source, fmt, output, project):
+    """Export knowledge entries to stdout or a file."""
+    from knowlin_mcp.db import KnowledgeDB
+
+    root = _resolve_project(project)
+    sub_stores = [
+        (s if s != "kb" else None) for s in source
+    ] if source else [None, "sessions", "docs"]
+
+    entries = []
+    for sub in sub_stores:
+        try:
+            db = KnowledgeDB(str(root), sub_store=sub)
+            entries.extend(db._read_jsonl(migrate=True))
+        except Exception:
+            pass
+
+    if fmt == "json":
+        text = json.dumps(entries, indent=2)
+    else:
+        text = "\n".join(json.dumps(e) for e in entries)
+
+    if output:
+        Path(output).write_text(text + "\n")
+        console.print(f"Exported {len(entries)} entries to {output}")
+    else:
+        click.echo(text)
+
+
+# =============================================================================
 # list
 # =============================================================================
 
