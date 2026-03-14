@@ -6,6 +6,7 @@ intent-adjusted weighting and unified result ranking.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from knowlin_mcp.db import KnowledgeDB
@@ -98,33 +99,49 @@ class MultiSourceSearch:
         # Collect results from each source with source tag
         all_results: list[dict[str, Any]] = []
 
+        # Build list of (source_name, store) for sources that have data
+        active_stores = []
         for source in sources:
             store = self._get_store(source)
-            if store is None:
-                continue
+            if store is not None:
+                active_stores.append((source, store))
 
+        def _search_source(source: str, store: KnowledgeDB) -> list[dict[str, Any]]:
+            results = store.search(
+                search_query,
+                limit=per_source_limit,
+                rerank=False,
+                date_from=date_from,
+                date_to=date_to,
+                entry_type=entry_type,
+                branch=branch,
+            )
+            source_weight = weights.get(source, 1.0)
+            for rank, result in enumerate(results, 1):
+                result["_source"] = source
+                base_score = 1.0 / (self.RRF_K + rank)
+                result["_weighted_score"] = base_score * source_weight
+            return results
+
+        # Parallel search across sub-stores (GIL released during NumPy/ONNX)
+        if len(active_stores) > 1:
+            with ThreadPoolExecutor(max_workers=len(active_stores)) as executor:
+                futures = {
+                    executor.submit(_search_source, src, st): src
+                    for src, st in active_stores
+                }
+                for future in as_completed(futures):
+                    source = futures[future]
+                    try:
+                        all_results.extend(future.result())
+                    except Exception as e:
+                        debug_log(f"Search failed for {source}: {e}")
+        elif active_stores:
+            src, st = active_stores[0]
             try:
-                results = store.search(
-                    search_query,
-                    limit=per_source_limit,
-                    rerank=False,
-                    date_from=date_from,
-                    date_to=date_to,
-                    entry_type=entry_type,
-                    branch=branch,
-                )
-
-                source_weight = weights.get(source, 1.0)
-
-                for rank, result in enumerate(results, 1):
-                    result["_source"] = source
-                    # Weighted RRF: apply source weight to the rank-based score
-                    base_score = 1.0 / (self.RRF_K + rank)
-                    result["_weighted_score"] = base_score * source_weight
-                    all_results.append(result)
-
+                all_results.extend(_search_source(src, st))
             except Exception as e:
-                debug_log(f"Search failed for {source}: {e}")
+                debug_log(f"Search failed for {src}: {e}")
 
         if not all_results:
             return []

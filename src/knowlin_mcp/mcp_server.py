@@ -11,10 +11,15 @@ from knowlin_mcp.platform import find_project_root
 mcp = FastMCP(
     "knowlin-mcp",
     instructions=(
-        "Knowledge database with hybrid semantic search. "
-        "Use knowlin_search to find prior knowledge, knowlin_get for full entry details, "
-        "knowlin_capture to save new insights/solutions/patterns, "
-        "knowlin_stats for database overview, knowlin_ingest to index new documents/sessions."
+        "Per-project knowledge database with hybrid semantic search. "
+        "Results are scoped to the current project's .knowledge-db/ directory.\n\n"
+        "WHEN TO USE:\n"
+        "- Before answering questions about the codebase or past decisions: "
+        "call knowlin_search for relevant prior context\n"
+        "- When you discover useful insights, solutions, or patterns: "
+        "call knowlin_capture to persist them for future retrieval\n\n"
+        "TIPS: Use specific queries over broad ones. Filter by source "
+        "(kb, sessions, docs) when you know where the answer likely lives."
     ),
 )
 

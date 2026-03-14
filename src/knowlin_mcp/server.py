@@ -195,17 +195,19 @@ class KnowledgeServer:
 
                 # Multi-source search
                 if sources and len(sources) > 1:
-                    ms = self.ms
-                    results = ms.search(
-                        query, sources=sources, limit=limit,
-                        date_from=date_from, date_to=date_to,
-                        entry_type=entry_type, branch=branch,
-                    )
-                    response = {
-                        "results": results,
-                        "query": query,
-                        "multi_source": True,
-                    }
+                    if not self.ms:
+                        response = {"error": "No index loaded"}
+                    else:
+                        results = self.ms.search(
+                            query, sources=sources, limit=limit,
+                            date_from=date_from, date_to=date_to,
+                            entry_type=entry_type, branch=branch,
+                        )
+                        response = {
+                            "results": results,
+                            "query": query,
+                            "multi_source": True,
+                        }
                 elif any([date_from, date_to, entry_type, branch]):
                     self.last_activity = time.time()
                     if not self.db:
@@ -366,6 +368,10 @@ class KnowledgeServer:
                         old_count = self.db.count()
                         self.db._load_index()
                         new_count = self.db.count()
+                        # Refresh cached MultiSourceSearch
+                        from knowlin_mcp.multi_search import MultiSourceSearch
+
+                        self.ms = MultiSourceSearch(str(self.project_root))
                         response = {
                             "status": "ok",
                             "old_count": old_count,

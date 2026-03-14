@@ -150,17 +150,7 @@ class KnowledgeDB:
                         self._sparse_vectors = {int(k): v for k, v in sparse_data.items()}
                     debug_log(f"Loaded {len(self._sparse_vectors)} sparse vectors")
 
-                all_entries = []
-                if self.jsonl_path.exists():
-                    with open(self.jsonl_path) as f:
-                        for line in f:
-                            if line.strip():
-                                try:
-                                    e = json.loads(line)
-                                    if isinstance(e, dict):
-                                        all_entries.append(migrate_entry(e))
-                                except json.JSONDecodeError:
-                                    pass
+                all_entries = self._read_jsonl(migrate=True)
 
                 indexed_ids = set(self._id_to_row.keys())
                 entries_by_id = {}
@@ -224,6 +214,33 @@ class KnowledgeDB:
                     json.dump(sparse_data, f)
 
             debug_log(f"Saved {len(self._id_to_row)} embeddings to disk")
+
+    def _read_jsonl(self, migrate: bool = False) -> list[dict[str, Any]]:
+        """Read all valid entries from JSONL. Silently skips malformed lines."""
+        entries: list[dict[str, Any]] = []
+        if not self.jsonl_path.exists():
+            return entries
+        with open(self.jsonl_path) as f:
+            for line in f:
+                if line.strip():
+                    try:
+                        e = json.loads(line)
+                        if isinstance(e, dict):
+                            entries.append(migrate_entry(e) if migrate else e)
+                    except json.JSONDecodeError:
+                        pass
+        return entries
+
+    def _write_jsonl(self, entries: list[dict[str, Any]]) -> None:
+        """Rewrite JSONL file with the given entries."""
+        with open(self.jsonl_path, "w") as f:
+            for e in entries:
+                f.write(json.dumps(e) + "\n")
+
+    def _append_jsonl(self, entry: dict[str, Any]) -> None:
+        """Append a single entry to JSONL."""
+        with open(self.jsonl_path, "a") as f:
+            f.write(json.dumps(entry) + "\n")
 
     def _build_searchable_text(self, entry: dict[str, Any]) -> str:
         """Build searchable text from entry fields (V3 + legacy)."""
@@ -385,8 +402,7 @@ class KnowledgeDB:
         embedding = list(self.dense_model.embed([searchable_text]))[0]
 
         # Write JSONL first (source of truth), then update in-memory index
-        with open(self.jsonl_path, "a") as f:
-            f.write(json.dumps(entry) + "\n")
+        self._append_jsonl(entry)
 
         if self._embeddings is None:
             self._embeddings = embedding.reshape(1, -1)
@@ -531,20 +547,8 @@ class KnowledgeDB:
             self._save_index()
 
             # Rewrite JSONL without removed entries
-            if self.jsonl_path.exists():
-                entries = []
-                with open(self.jsonl_path) as f:
-                    for line in f:
-                        if line.strip():
-                            try:
-                                e = json.loads(line)
-                                if isinstance(e, dict) and e.get("id") not in id_set:
-                                    entries.append(e)
-                            except json.JSONDecodeError:
-                                pass
-                with open(self.jsonl_path, "w") as f:
-                    for e in entries:
-                        f.write(json.dumps(e) + "\n")
+            kept = [e for e in self._read_jsonl() if e.get("id") not in id_set]
+            self._write_jsonl(kept)
 
         return removed
 
@@ -709,29 +713,18 @@ class KnowledgeDB:
         if not self.jsonl_path.exists():
             return 0
 
-        entries = []
-        needs_id_update = False
-        with open(self.jsonl_path) as f:
-            for line in f:
-                if line.strip():
-                    try:
-                        entry = json.loads(line)
-                        if isinstance(entry, dict):
-                            entry = migrate_entry(entry)
-                            if not entry.get("id"):
-                                entry["id"] = str(uuid.uuid4())
-                                needs_id_update = True
-                            entries.append(entry)
-                    except json.JSONDecodeError:
-                        pass
-
+        entries = self._read_jsonl(migrate=True)
         if not entries:
             return 0
 
+        needs_id_update = False
+        for entry in entries:
+            if not entry.get("id"):
+                entry["id"] = str(uuid.uuid4())
+                needs_id_update = True
+
         if needs_id_update:
-            with open(self.jsonl_path, "w") as f:
-                for entry in entries:
-                    f.write(json.dumps(entry) + "\n")
+            self._write_jsonl(entries)
 
         texts = [self._build_searchable_text(e) for e in entries]
 
@@ -799,29 +792,19 @@ class KnowledgeDB:
 
         now = datetime.now().isoformat()
         updated_count = 0
-        entries = []
         id_set = set(entry_ids)
 
-        with open(self.jsonl_path) as f:
-            for line in f:
-                if line.strip():
-                    try:
-                        entry = json.loads(line)
-                        if isinstance(entry, dict):
-                            if entry.get("id") in id_set:
-                                entry["usage_count"] = entry.get("usage_count", 0) + 1
-                                entry["last_used"] = now
-                                if entry["usage_count"] >= 3 and not entry.get("pinned"):
-                                    entry["pinned"] = True
-                                updated_count += 1
-                            entries.append(entry)
-                    except json.JSONDecodeError:
-                        pass
+        entries = self._read_jsonl()
+        for entry in entries:
+            if entry.get("id") in id_set:
+                entry["usage_count"] = entry.get("usage_count", 0) + 1
+                entry["last_used"] = now
+                if entry["usage_count"] >= 3 and not entry.get("pinned"):
+                    entry["pinned"] = True
+                updated_count += 1
 
         if updated_count > 0:
-            with open(self.jsonl_path, "w") as f:
-                for entry in entries:
-                    f.write(json.dumps(entry) + "\n")
+            self._write_jsonl(entries)
 
             # Sync in-memory cache from the JSONL-updated entries
             entries_by_id = {e["id"]: e for e in entries if e.get("id") in id_set}
@@ -844,9 +827,7 @@ class KnowledgeDB:
         for e in pinned[: len(pinned) - self.MAX_PINNED]:
             e["pinned"] = False
 
-        with open(self.jsonl_path, "w") as f:
-            for entry in entries:
-                f.write(json.dumps(entry) + "\n")
+        self._write_jsonl(entries)
 
         unpinned_ids = {e.get("id") for e in entries if not e.get("pinned")}
         for i, cached in enumerate(self._entries):
@@ -1000,9 +981,7 @@ class KnowledgeDB:
             import shutil
             shutil.copy(self.jsonl_path, backup_path)
 
-            with open(self.jsonl_path, "w") as f:
-                for entry in entries:
-                    f.write(json.dumps(entry) + "\n")
+            self._write_jsonl(entries)
 
             result["status"] = "migrated"
             result["backup"] = str(backup_path)
