@@ -6,6 +6,7 @@ Entry point: knowlin
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import click
@@ -544,7 +545,13 @@ def doctor(fix, project):
 @main.group()
 def ingest():
     """Ingest content from external sources."""
-    pass
+    from knowlin_mcp.models import models_cached
+
+    if not models_cached():
+        console.print(
+            "[yellow]First run: embedding models (~200MB) will be downloaded. "
+            "This may take a few minutes...[/yellow]"
+        )
 
 
 @ingest.command("sessions")
@@ -706,15 +713,20 @@ def sources(do_init, project):
 # =============================================================================
 
 
-_MCP_JSON_TEMPLATE = """\
-{
-  "mcpServers": {
-    "knowlin-mcp": {
-      "command": "knowlin-mcp"
-    }
-  }
-}
-"""
+def _build_mcp_json() -> str:
+    """Build .mcp.json with the absolute path to knowlin-mcp."""
+    import shutil
+    import sysconfig
+
+    cmd = shutil.which("knowlin-mcp")
+    if cmd is None:
+        # Fallback: resolve from the Python environment's scripts dir
+        scripts_dir = Path(sysconfig.get_path("scripts"))
+        candidate = scripts_dir / "knowlin-mcp"
+        cmd = str(candidate) if candidate.exists() else "knowlin-mcp"
+
+    config = {"mcpServers": {"knowlin-mcp": {"command": cmd}}}
+    return json.dumps(config, indent=2) + "\n"
 
 
 @main.command()
@@ -749,7 +761,8 @@ def init(mcp, path):
         if mcp_path.exists():
             console.print("  .mcp.json already exists")
         else:
-            mcp_path.write_text(_MCP_JSON_TEMPLATE)
+            mcp_json = _build_mcp_json()
+            mcp_path.write_text(mcp_json)
             console.print("  Created .mcp.json (MCP server config)")
 
     console.print()

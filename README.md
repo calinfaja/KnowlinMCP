@@ -30,8 +30,10 @@ Per-project knowledge database with hybrid semantic search, exposed as an MCP se
 
 ## Install
 
+Requires **Python 3.9+**.
+
 ```bash
-git clone <repo> && cd knowlin-mcp
+git clone https://github.com/calinfaja/KnowlinMCP.git && cd KnowlinMCP
 ./install.sh              # creates .venv, installs deps + MCP support
 ./install.sh --with-pdf   # also install PDF ingestion
 ```
@@ -149,7 +151,7 @@ command = "knowlin-mcp"
 
 </details>
 
-4 tools exposed: `knowlin_search`, `knowlin_get`, `knowlin_stats`, `knowlin_ingest`.
+5 tools exposed: `knowlin_search`, `knowlin_get`, `knowlin_capture`, `knowlin_stats`, `knowlin_ingest`.
 
 ## Python API
 
@@ -180,9 +182,9 @@ results = ms.search("how to configure auth", sources=["kb", "docs"])
 ## Development
 
 ```bash
-git clone <repo> && cd knowlin-mcp
+git clone https://github.com/calinfaja/KnowlinMCP.git && cd KnowlinMCP
 ./install.sh
-.venv/bin/pytest tests/ -v           # 266 tests
+.venv/bin/pytest tests/ -v           # unit tests
 .venv/bin/ruff check src/ tests/     # lint
 .venv/bin/black src/ tests/          # format
 ```

@@ -13,6 +13,7 @@ mcp = FastMCP(
     instructions=(
         "Knowledge database with hybrid semantic search. "
         "Use knowlin_search to find prior knowledge, knowlin_get for full entry details, "
+        "knowlin_capture to save new insights/solutions/patterns, "
         "knowlin_stats for database overview, knowlin_ingest to index new documents/sessions."
     ),
 )
@@ -251,6 +252,60 @@ def knowlin_ingest(source: str = "all") -> str:
 
     except Exception as e:
         raise ToolError(f"Ingest error: {e}") from e
+
+
+@mcp.tool(title="Capture Knowledge Entry", annotations=_WRITE)
+def knowlin_capture(
+    title: str,
+    insight: str,
+    entry_type: str = "finding",
+    keywords: str = "",
+    priority: str = "medium",
+) -> str:
+    """Save a knowledge entry to the database.
+
+    Use this to persist insights, solutions, patterns, or decisions discovered
+    during a session so they can be retrieved later.
+
+    Args:
+        title: Short descriptive title (5+ chars, 2+ words)
+        insight: The main content/insight to capture
+        entry_type: finding, solution, pattern, warning, decision, or discovery
+        keywords: Comma-separated keywords for search (e.g. "auth,jwt,security")
+        priority: low, medium, high, or critical
+    """
+    try:
+        from knowlin_mcp.capture import create_entry_from_json, save_entry
+
+        root = _get_project_root()
+
+        valid_types = {"finding", "solution", "pattern", "warning", "decision", "discovery"}
+        if entry_type not in valid_types:
+            return f"Invalid type: {entry_type}. Use one of: {', '.join(sorted(valid_types))}"
+
+        valid_priorities = {"low", "medium", "high", "critical"}
+        if priority not in valid_priorities:
+            return f"Invalid priority: {priority}. Use one of: {', '.join(sorted(valid_priorities))}"
+
+        kw_list = [k.strip() for k in keywords.split(",") if k.strip()] if keywords else []
+
+        entry = create_entry_from_json({
+            "title": title,
+            "insight": insight,
+            "type": entry_type,
+            "keywords": kw_list,
+            "priority": priority,
+        })
+
+        kb_dir = str(find_project_root() or root)
+        saved = save_entry(entry, kb_dir)
+
+        if saved:
+            return f"Saved: {entry.get('title', title)} (ID: {entry.get('id', '?')})"
+        return "Failed to save entry. Check that .knowledge-db/ exists."
+
+    except Exception as e:
+        raise ToolError(f"Capture error: {e}") from e
 
 
 def main():

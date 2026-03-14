@@ -10,6 +10,7 @@ from knowlin_mcp import mcp_server
 from knowlin_mcp.mcp_server import (
     _format_full_entry,
     _parse_sources,
+    knowlin_capture,
     knowlin_get,
     knowlin_ingest,
     knowlin_search,
@@ -377,3 +378,51 @@ class TestFormatFullEntry:
 
         assert "# Bare Entry" in result
         assert "Source: docs" in result
+
+
+# --- knowlin_capture ---
+
+
+class TestKnowlinCapture:
+    @patch("knowlin_mcp.mcp_server._get_project_root")
+    @patch("knowlin_mcp.mcp_server.find_project_root")
+    @patch("knowlin_mcp.capture.save_entry")
+    @patch("knowlin_mcp.capture.create_entry_from_json")
+    def test_capture_success(self, mock_create, mock_save, mock_find, mock_root, tmp_path):
+        mock_root.return_value = str(tmp_path)
+        mock_find.return_value = tmp_path
+        mock_create.return_value = {"id": "test-id", "title": "Test Insight"}
+        mock_save.return_value = True
+
+        result = knowlin_capture(
+            title="Test Insight",
+            insight="This is a test insight",
+            entry_type="finding",
+            keywords="test,mcp",
+            priority="medium",
+        )
+
+        assert "Saved" in result
+        assert "test-id" in result
+        mock_create.assert_called_once()
+        mock_save.assert_called_once()
+
+    @patch("knowlin_mcp.mcp_server._get_project_root")
+    def test_capture_invalid_type(self, mock_root, tmp_path):
+        mock_root.return_value = str(tmp_path)
+
+        result = knowlin_capture(
+            title="Test", insight="Test", entry_type="invalid"
+        )
+
+        assert "Invalid type" in result
+
+    @patch("knowlin_mcp.mcp_server._get_project_root")
+    def test_capture_invalid_priority(self, mock_root, tmp_path):
+        mock_root.return_value = str(tmp_path)
+
+        result = knowlin_capture(
+            title="Test", insight="Test", priority="urgent"
+        )
+
+        assert "Invalid priority" in result

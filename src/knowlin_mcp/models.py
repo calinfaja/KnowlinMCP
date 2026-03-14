@@ -37,6 +37,17 @@ MODEL_NAMES = [
 ]
 
 
+def models_cached() -> bool:
+    """Check if embedding models are already downloaded."""
+    import os
+
+    cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "fastembed")
+    if not os.path.isdir(cache_dir):
+        return False
+    # Check for at least one model directory
+    return any(d for d in os.listdir(cache_dir) if os.path.isdir(os.path.join(cache_dir, d)))
+
+
 def _warn_if_first_run() -> None:
     """Print a one-time warning if embedding models need to be downloaded."""
     global _first_run_warned
@@ -44,12 +55,10 @@ def _warn_if_first_run() -> None:
         return
     _first_run_warned = True
 
-    import os
     import sys
 
-    cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "fastembed")
-    if os.path.isdir(cache_dir) and os.listdir(cache_dir):
-        return  # Models already cached
+    if models_cached():
+        return
 
     print(
         "First run: downloading embedding models (~200MB). This may take a few minutes...",

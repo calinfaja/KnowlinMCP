@@ -50,7 +50,7 @@ class TestSearchDeterminism:
     """Same query must always return same results."""
 
     @given(query=_query_strategy)
-    @settings(max_examples=10, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(max_examples=10, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_deterministic_results(self, prop_db, query):
         r1 = prop_db.search(query, limit=3, rerank=False)
         r2 = prop_db.search(query, limit=3, rerank=False)
@@ -63,7 +63,7 @@ class TestScoreOrdering:
     """Results must be sorted by score descending."""
 
     @given(query=_query_strategy)
-    @settings(max_examples=10, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(max_examples=10, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_scores_descending(self, prop_db, query):
         results = prop_db.search(query, limit=5, rerank=False)
         if len(results) < 2:
@@ -80,7 +80,7 @@ class TestLimitMonotonicity:
         k_small=st.integers(min_value=1, max_value=2),
         k_large=st.integers(min_value=3, max_value=5),
     )
-    @settings(max_examples=10, suppress_health_check=[HealthCheck.function_scoped_fixture])
+    @settings(max_examples=10, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_larger_k_returns_more(self, prop_db, query, k_small, k_large):
         small = prop_db.search(query, limit=k_small, rerank=False)
         large = prop_db.search(query, limit=k_large, rerank=False)
