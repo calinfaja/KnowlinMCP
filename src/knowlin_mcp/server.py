@@ -115,6 +115,20 @@ class KnowledgeServer:
         self.running = False
         self.load_time = 0.0
         self.last_activity = time.time()
+        self._handlers = {
+            "search": self._cmd_search,
+            "status": self._cmd_status,
+            "ping": self._cmd_ping,
+            "add": self._cmd_add,
+            "update_usage": self._cmd_update_usage,
+            "recent": self._cmd_recent,
+            "search_by_date": self._cmd_search_by_date,
+            "get_timeline": self._cmd_get_timeline,
+            "get_related": self._cmd_get_related,
+            "get": self._cmd_get,
+            "ingest": self._cmd_ingest,
+            "reload": self._cmd_reload,
+        }
 
     def load_index(self) -> bool:
         """Load fastembed-based knowledge index."""
@@ -142,22 +156,188 @@ class KnowledgeServer:
         print(f"Index loaded in {self.load_time:.2f}s ({count} entries)")
         return True
 
-    def search(self, query: str, limit: int = 5) -> dict:
-        """Perform semantic search."""
-        self.last_activity = time.time()
+    # -------------------------------------------------------------------------
+    # Command handlers -- each returns a response dict
+    # -------------------------------------------------------------------------
 
+    def _require_db(self) -> dict[str, str] | None:
+        """Return error response if DB is not loaded, else None."""
         if not self.db:
             return {"error": "No index loaded"}
+        return None
 
+    def _cmd_search(self, request: dict) -> dict:
+        query = request.get("query", "")
+        limit = request.get("limit", 5)
+        date_from = request.get("date_from")
+        date_to = request.get("date_to")
+        entry_type = request.get("entry_type")
+        branch = request.get("branch")
+        sources = request.get("sources")
+
+        # Multi-source search
+        if sources and len(sources) > 1:
+            if not self.ms:
+                return {"error": "No index loaded"}
+            results = self.ms.search(
+                query, sources=sources, limit=limit,
+                date_from=date_from, date_to=date_to,
+                entry_type=entry_type, branch=branch,
+            )
+            return {"results": results, "query": query, "multi_source": True}
+
+        # Single-source search (with or without filters)
+        if err := self._require_db():
+            return err
         start = time.time()
-        results = self.db.search(query, limit)
-        search_time = time.time() - start
-
+        results = self.db.search(
+            query, limit,
+            date_from=date_from, date_to=date_to,
+            entry_type=entry_type, branch=branch,
+        )
         return {
             "results": results,
-            "search_time_ms": round(search_time * 1000, 2),
+            "search_time_ms": round((time.time() - start) * 1000, 2),
             "query": query,
         }
+
+    def _cmd_status(self, request: dict) -> dict:
+        return {
+            "status": "running",
+            "project": str(self.project_root),
+            "port": self.port,
+            "load_time": self.load_time,
+            "index_loaded": self.db is not None,
+            "idle_seconds": int(time.time() - self.last_activity),
+            "entries": self.db.count() if self.db else 0,
+            "backend": "fastembed",
+        }
+
+    def _cmd_ping(self, request: dict) -> dict:
+        return {"pong": True, "project": str(self.project_root), "port": self.port}
+
+    def _cmd_add(self, request: dict) -> dict:
+        entry = request.get("entry")
+        if not entry:
+            return {"error": "No entry provided"}
+        if err := self._require_db():
+            return err
+        try:
+            entry_id = self.db.add(entry)
+            return {"status": "ok", "id": entry_id}
+        except Exception as e:
+            return {"error": f"Failed to add entry: {e}"}
+
+    def _cmd_update_usage(self, request: dict) -> dict:
+        entry_ids = request.get("ids", [])
+        if not entry_ids:
+            return {"error": "No ids provided"}
+        if err := self._require_db():
+            return err
+        try:
+            updated = self.db.update_usage(entry_ids)
+            return {"status": "ok", "updated": updated}
+        except Exception as e:
+            return {"error": f"Failed to update usage: {e}"}
+
+    def _cmd_recent(self, request: dict) -> dict:
+        if err := self._require_db():
+            return err
+        try:
+            limit = request.get("limit", 3)
+            entries = self.db.get_recent_important(limit)
+            return {"status": "ok", "entries": entries}
+        except Exception as e:
+            return {"error": f"Failed to get recent: {e}"}
+
+    def _cmd_search_by_date(self, request: dict) -> dict:
+        if err := self._require_db():
+            return err
+        start_date = request.get("start", "")
+        if not start_date:
+            return {"error": "Missing 'start' date parameter"}
+        try:
+            end_date = request.get("end")
+            limit = request.get("limit", 50)
+            entries = self.db.search_by_date(start_date, end_date, limit)
+            return {"status": "ok", "entries": entries, "count": len(entries)}
+        except Exception as e:
+            return {"error": f"search_by_date failed: {e}"}
+
+    def _cmd_get_timeline(self, request: dict) -> dict:
+        if err := self._require_db():
+            return err
+        date = request.get("date", "")
+        if not date:
+            return {"error": "Missing 'date' parameter"}
+        try:
+            entries = self.db.get_timeline(date)
+            return {"status": "ok", "entries": entries, "count": len(entries)}
+        except Exception as e:
+            return {"error": f"get_timeline failed: {e}"}
+
+    def _cmd_get_related(self, request: dict) -> dict:
+        if err := self._require_db():
+            return err
+        entry_id = request.get("id", "")
+        if not entry_id:
+            return {"error": "Missing 'id' parameter"}
+        try:
+            entries = self.db.get_related(entry_id)
+            return {"status": "ok", "entries": entries, "count": len(entries)}
+        except Exception as e:
+            return {"error": f"get_related failed: {e}"}
+
+    def _cmd_get(self, request: dict) -> dict:
+        if err := self._require_db():
+            return err
+        entry_id = request.get("id", "")
+        if not entry_id:
+            return {"error": "Missing 'id' parameter"}
+        try:
+            entry = self.db.get(entry_id)
+            if entry:
+                return {"status": "ok", "entry": entry}
+            return {"error": f"Entry not found: {entry_id}"}
+        except Exception as e:
+            return {"error": f"get failed: {e}"}
+
+    def _cmd_ingest(self, request: dict) -> dict:
+        source = request.get("source", "all")
+        full = request.get("full", False)
+        try:
+            counts: dict[str, int] = {}
+            if source in ("sessions", "all"):
+                from knowlin_mcp.ingest_sessions import SessionIngester
+                si = SessionIngester(str(self.project_root))
+                counts["sessions"] = si.ingest(full=full)
+            if source in ("docs", "all"):
+                from knowlin_mcp.ingest_docs import DocsIngester
+                di = DocsIngester(str(self.project_root))
+                counts["docs"] = di.ingest(full=full)
+            total = sum(counts.values())
+            if total > 0 and self.db:
+                self.db._load_index()
+            return {"status": "ok", "counts": counts, "total": total}
+        except Exception as e:
+            return {"error": f"Ingest failed: {e}"}
+
+    def _cmd_reload(self, request: dict) -> dict:
+        if err := self._require_db():
+            return err
+        try:
+            old_count = self.db.count()
+            self.db._load_index()
+            new_count = self.db.count()
+            from knowlin_mcp.multi_search import MultiSourceSearch
+            self.ms = MultiSourceSearch(str(self.project_root))
+            return {"status": "ok", "old_count": old_count, "new_count": new_count}
+        except Exception as e:
+            return {"error": f"Reload failed: {e}"}
+
+    # -------------------------------------------------------------------------
+    # Client connection handler (thin dispatcher)
+    # -------------------------------------------------------------------------
 
     def handle_client(self, conn: socket.socket) -> None:
         """Handle a client connection."""
@@ -186,203 +366,12 @@ class KnowledgeServer:
             if cmd not in ("ping", "status"):
                 self.last_activity = time.time()
 
-            if cmd == "search":
-                query = request.get("query", "")
-                limit = request.get("limit", 5)
-                date_from = request.get("date_from")
-                date_to = request.get("date_to")
-                entry_type = request.get("entry_type")
-                branch = request.get("branch")
-                sources = request.get("sources")
-
-                # Multi-source search
-                if sources and len(sources) > 1:
-                    if not self.ms:
-                        response = {"error": "No index loaded"}
-                    else:
-                        results = self.ms.search(
-                            query, sources=sources, limit=limit,
-                            date_from=date_from, date_to=date_to,
-                            entry_type=entry_type, branch=branch,
-                        )
-                        response = {
-                            "results": results,
-                            "query": query,
-                            "multi_source": True,
-                        }
-                elif any([date_from, date_to, entry_type, branch]):
-                    self.last_activity = time.time()
-                    if not self.db:
-                        response = {"error": "No index loaded"}
-                    else:
-                        start = time.time()
-                        results = self.db.search(
-                            query, limit,
-                            date_from=date_from, date_to=date_to,
-                            entry_type=entry_type, branch=branch,
-                        )
-                        search_time = time.time() - start
-                        response = {
-                            "results": results,
-                            "search_time_ms": round(search_time * 1000, 2),
-                            "query": query,
-                        }
-                else:
-                    response = self.search(query, limit)
-
-            elif cmd == "status":
-                idle_time = time.time() - self.last_activity
-                response = {
-                    "status": "running",
-                    "project": str(self.project_root),
-                    "port": self.port,
-                    "load_time": self.load_time,
-                    "index_loaded": self.db is not None,
-                    "idle_seconds": int(idle_time),
-                    "entries": self.db.count() if self.db else 0,
-                    "backend": "fastembed",
-                }
-
-            elif cmd == "ping":
-                response = {
-                    "pong": True,
-                    "project": str(self.project_root),
-                    "port": self.port,
-                }
-
-            elif cmd == "add":
-                entry = request.get("entry")
-                if not entry:
-                    response = {"error": "No entry provided"}
-                elif not self.db:
-                    response = {"error": "No index loaded"}
-                else:
-                    try:
-                        entry_id = self.db.add(entry)
-                        response = {"status": "ok", "id": entry_id}
-                    except Exception as e:
-                        response = {"error": f"Failed to add entry: {e}"}
-
-            elif cmd == "update_usage":
-                entry_ids = request.get("ids", [])
-                if not entry_ids:
-                    response = {"error": "No ids provided"}
-                elif not self.db:
-                    response = {"error": "No index loaded"}
-                else:
-                    try:
-                        updated = self.db.update_usage(entry_ids)
-                        response = {"status": "ok", "updated": updated}
-                    except Exception as e:
-                        response = {"error": f"Failed to update usage: {e}"}
-
-            elif cmd == "recent":
-                limit = request.get("limit", 3)
-                if not self.db:
-                    response = {"error": "No index loaded"}
-                else:
-                    try:
-                        entries = self.db.get_recent_important(limit)
-                        response = {"status": "ok", "entries": entries}
-                    except Exception as e:
-                        response = {"error": f"Failed to get recent: {e}"}
-
-            elif cmd == "search_by_date":
-                start_date = request.get("start", "")
-                end_date = request.get("end")
-                limit = request.get("limit", 50)
-                if not self.db:
-                    response = {"error": "No index loaded"}
-                elif not start_date:
-                    response = {"error": "Missing 'start' date parameter"}
-                else:
-                    try:
-                        entries = self.db.search_by_date(start_date, end_date, limit)
-                        response = {"status": "ok", "entries": entries, "count": len(entries)}
-                    except Exception as e:
-                        response = {"error": f"search_by_date failed: {e}"}
-
-            elif cmd == "get_timeline":
-                date = request.get("date", "")
-                if not self.db:
-                    response = {"error": "No index loaded"}
-                elif not date:
-                    response = {"error": "Missing 'date' parameter"}
-                else:
-                    try:
-                        entries = self.db.get_timeline(date)
-                        response = {"status": "ok", "entries": entries, "count": len(entries)}
-                    except Exception as e:
-                        response = {"error": f"get_timeline failed: {e}"}
-
-            elif cmd == "get_related":
-                entry_id = request.get("id", "")
-                if not self.db:
-                    response = {"error": "No index loaded"}
-                elif not entry_id:
-                    response = {"error": "Missing 'id' parameter"}
-                else:
-                    try:
-                        entries = self.db.get_related(entry_id)
-                        response = {"status": "ok", "entries": entries, "count": len(entries)}
-                    except Exception as e:
-                        response = {"error": f"get_related failed: {e}"}
-
-            elif cmd == "get":
-                entry_id = request.get("id", "")
-                if not self.db:
-                    response = {"error": "No index loaded"}
-                elif not entry_id:
-                    response = {"error": "Missing 'id' parameter"}
-                else:
-                    entry = self.db.get(entry_id)
-                    if entry:
-                        response = {"status": "ok", "entry": entry}
-                    else:
-                        response = {"error": f"Entry not found: {entry_id}"}
-
-            elif cmd == "ingest":
-                source = request.get("source", "all")
-                full = request.get("full", False)
-                try:
-                    counts = {}
-                    if source in ("sessions", "all"):
-                        from knowlin_mcp.ingest_sessions import SessionIngester
-                        si = SessionIngester(str(self.project_root))
-                        counts["sessions"] = si.ingest(full=full)
-                    if source in ("docs", "all"):
-                        from knowlin_mcp.ingest_docs import DocsIngester
-                        di = DocsIngester(str(self.project_root))
-                        counts["docs"] = di.ingest(full=full)
-                    total = sum(counts.values())
-                    # Reload main index if entries were added
-                    if total > 0 and self.db:
-                        self.db._load_index()
-                    response = {"status": "ok", "counts": counts, "total": total}
-                except Exception as e:
-                    response = {"error": f"Ingest failed: {e}"}
-
-            elif cmd == "reload":
-                if not self.db:
-                    response = {"error": "No index loaded"}
-                else:
-                    try:
-                        old_count = self.db.count()
-                        self.db._load_index()
-                        new_count = self.db.count()
-                        # Refresh cached MultiSourceSearch
-                        from knowlin_mcp.multi_search import MultiSourceSearch
-
-                        self.ms = MultiSourceSearch(str(self.project_root))
-                        response = {
-                            "status": "ok",
-                            "old_count": old_count,
-                            "new_count": new_count,
-                        }
-                    except Exception as e:
-                        response = {"error": f"Reload failed: {e}"}
-            else:
+            # Dispatch to handler (explicit allowlist)
+            handler = self._handlers.get(cmd)
+            if handler is None:
                 response = {"error": f"Unknown command: {cmd}"}
+            else:
+                response = handler(request)
 
             conn.sendall(json.dumps(response).encode("utf-8"))
         except Exception as e:
