@@ -14,48 +14,94 @@ from knowlin_mcp.db import KnowledgeDB
 GOLDEN_CORPUS = [
     {
         "title": "BLE power optimization techniques",
-        "insight": "Nordic nRF52 sleep modes reduce current draw to 2uA. Use system OFF mode when possible.",
+        "insight": (
+            "Nordic nRF52 sleep modes reduce current draw to 2uA."
+            " Use system OFF mode when possible."
+        ),
     },
     {
         "title": "OAuth2 token refresh patterns",
-        "insight": "Use refresh tokens with sliding window expiry. Rotate refresh tokens on each use.",
+        "insight": (
+            "Use refresh tokens with sliding window expiry. Rotate refresh tokens on each use."
+        ),
     },
     {
         "title": "Python asyncio event loop guide",
-        "insight": "asyncio event loop handles IO bound concurrency. Never block with synchronous calls.",
+        "insight": (
+            "asyncio event loop handles IO bound concurrency. Never block with synchronous calls."
+        ),
     },
     {
         "title": "RRF fusion for hybrid search",
-        "insight": "Reciprocal Rank Fusion combines dense and sparse rankings with k=60 smoothing constant.",
+        "insight": (
+            "Reciprocal Rank Fusion combines dense and sparse rankings"
+            " with k=60 smoothing constant."
+        ),
     },
     {
         "title": "Docker multi-stage build patterns",
-        "insight": "Order Dockerfile instructions by change frequency. Use multi-stage to reduce image size.",
+        "insight": (
+            "Order Dockerfile instructions by change frequency."
+            " Use multi-stage to reduce image size."
+        ),
     },
     {
         "title": "JWT authentication security practices",
-        "insight": "Always validate JWT server-side. Check issuer, audience, and expiry. Never trust client tokens.",
+        "insight": (
+            "Always validate JWT server-side. Check issuer, audience, and expiry."
+            " Never trust client tokens."
+        ),
     },
     {
         "title": "PostgreSQL connection pool sizing",
-        "insight": "Pool size = (2 * cpu_count) + disk_spindles for OLTP. Monitor active vs idle connections.",
+        "insight": (
+            "Pool size = (2 * cpu_count) + disk_spindles for OLTP."
+            " Monitor active vs idle connections."
+        ),
     },
     {
         "title": "Redis caching with TTL strategies",
-        "insight": "Set appropriate TTL to prevent stale data. Use cache-aside pattern for read-heavy workloads.",
+        "insight": (
+            "Set appropriate TTL to prevent stale data."
+            " Use cache-aside pattern for read-heavy workloads."
+        ),
     },
 ]
 
 # Golden queries: each should find its matching corpus entry at rank 1
 GOLDEN_QUERIES = [
-    {"query": "bluetooth battery drain embedded firmware", "expected_title": "BLE power optimization techniques"},
-    {"query": "oauth session expiry refresh token rotation", "expected_title": "OAuth2 token refresh patterns"},
-    {"query": "python concurrent IO networking", "expected_title": "Python asyncio event loop guide"},
-    {"query": "combine search results ranking algorithm", "expected_title": "RRF fusion for hybrid search"},
-    {"query": "dockerfile build cache layers optimization", "expected_title": "Docker multi-stage build patterns"},
-    {"query": "token validation authentication security", "expected_title": "JWT authentication security practices"},
-    {"query": "database connection pool performance tuning", "expected_title": "PostgreSQL connection pool sizing"},
-    {"query": "cache eviction stale data TTL", "expected_title": "Redis caching with TTL strategies"},
+    {
+        "query": "bluetooth battery drain embedded firmware",
+        "expected_title": "BLE power optimization techniques",
+    },
+    {
+        "query": "oauth session expiry refresh token rotation",
+        "expected_title": "OAuth2 token refresh patterns",
+    },
+    {
+        "query": "python concurrent IO networking",
+        "expected_title": "Python asyncio event loop guide",
+    },
+    {
+        "query": "combine search results ranking algorithm",
+        "expected_title": "RRF fusion for hybrid search",
+    },
+    {
+        "query": "dockerfile build cache layers optimization",
+        "expected_title": "Docker multi-stage build patterns",
+    },
+    {
+        "query": "token validation authentication security",
+        "expected_title": "JWT authentication security practices",
+    },
+    {
+        "query": "database connection pool performance tuning",
+        "expected_title": "PostgreSQL connection pool sizing",
+    },
+    {
+        "query": "cache eviction stale data TTL",
+        "expected_title": "Redis caching with TTL strategies",
+    },
 ]
 
 REQUIRED_HIT_AT_1 = 0.75  # 6/8 queries must hit at rank 1

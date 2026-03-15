@@ -72,7 +72,9 @@ class TestPDFIngestion:
         chunks = ingester._chunk_by_headings(text, "guide.md")
 
         # Chunks under headings should have hierarchy prepended
-        sub_chunks = [c for c in chunks if "Prerequisites" in c["insight"] or "Steps" in c["insight"]]
+        sub_chunks = [
+            c for c in chunks if "Prerequisites" in c["insight"] or "Steps" in c["insight"]
+        ]
         if sub_chunks:
             # At least one chunk should start with hierarchy
             has_hierarchy = any(
@@ -96,7 +98,10 @@ class TestPDFIngestion:
             import fitz  # PyMuPDF
             doc = fitz.open()
             page = doc.new_page()
-            page.insert_text((72, 72), "# Test Document\n\nThis is test content for PDF ingestion testing.")
+            page.insert_text(
+                (72, 72),
+                "# Test Document\n\nThis is test content for PDF ingestion testing.",
+            )
             doc.save(str(pdf_path))
             doc.close()
         except Exception:

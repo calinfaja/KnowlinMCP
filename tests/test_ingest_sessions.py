@@ -128,7 +128,11 @@ class TestScoreContent:
         ingester = SessionIngester.__new__(SessionIngester)
         ingester._registry = {}
 
-        for text in ["I'll check that for you", "Let me look at the code", "Sure, I can do that", "Done."]:
+        skip_texts = [
+            "I'll check that for you", "Let me look at the code",
+            "Sure, I can do that", "Done.",
+        ]
+        for text in skip_texts:
             score, _ = ingester._score_content(text)
             assert score == 0.0, f"Should skip short message: {text!r}"
 
@@ -145,7 +149,9 @@ class TestScoreContent:
         ingester = SessionIngester.__new__(SessionIngester)
         ingester._registry = {}
 
-        text_no_code = "The solution is to update the config with the correct values for production."
+        text_no_code = (
+            "The solution is to update the config with the correct values for production."
+        )
         text_with_code = text_no_code + "\n```python\nconfig['key'] = 'value'\n```"
 
         score_no_code, _ = ingester._score_content(text_no_code)
@@ -156,7 +162,9 @@ class TestScoreContent:
         ingester = SessionIngester.__new__(SessionIngester)
         ingester._registry = {}
 
-        text = "We decided to go with Redis instead of Memcached because of the persistence features."
+        text = (
+            "We decided to go with Redis instead of Memcached because of the persistence features."
+        )
         _, entry_type = ingester._score_content(text)
         assert entry_type == "decision"
 
@@ -164,7 +172,10 @@ class TestScoreContent:
         ingester = SessionIngester.__new__(SessionIngester)
         ingester._registry = {}
 
-        text = "I found that the API endpoint was returning cached data. Turns out the CDN layer was caching aggressively."
+        text = (
+            "I found that the API endpoint was returning cached data."
+            " Turns out the CDN layer was caching aggressively."
+        )
         _, entry_type = ingester._score_content(text)
         assert entry_type == "discovery"
 
@@ -204,7 +215,9 @@ class TestIsRealUserMessage:
 
     def test_continuation_summary_filtered(self):
         ingester = SessionIngester.__new__(SessionIngester)
-        text = "This session is being continued from a previous conversation that ran out of context."
+        text = (
+            "This session is being continued from a previous conversation that ran out of context."
+        )
         assert ingester._is_real_user_message(text) == ""
 
     def test_text_blocks_extracted(self):
@@ -461,7 +474,9 @@ class TestIngest:
         assert ingester.ingest() == 0
 
     @patch("knowlin_mcp.db.KnowledgeDB")
-    def test_ingest_processes_files(self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl):
+    def test_ingest_processes_files(
+        self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl
+    ):
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["id1"]
         mock_db_cls.return_value = mock_db
@@ -475,7 +490,9 @@ class TestIngest:
         mock_db.batch_add.assert_called_once()
 
     @patch("knowlin_mcp.db.KnowledgeDB")
-    def test_incremental_skips_processed(self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl):
+    def test_incremental_skips_processed(
+        self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl
+    ):
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["id1"]
         mock_db_cls.return_value = mock_db
@@ -489,7 +506,9 @@ class TestIngest:
         assert count == 0
 
     @patch("knowlin_mcp.db.KnowledgeDB")
-    def test_full_reprocesses_all(self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl):
+    def test_full_reprocesses_all(
+        self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl
+    ):
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["id1"]
         mock_db_cls.return_value = mock_db
@@ -538,7 +557,9 @@ class TestRegistry:
     """Tests for session registry persistence."""
 
     @patch("knowlin_mcp.db.KnowledgeDB")
-    def test_registry_saved_after_ingest(self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl):
+    def test_registry_saved_after_ingest(
+        self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl
+    ):
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["id1"]
         mock_db_cls.return_value = mock_db
@@ -564,7 +585,9 @@ class TestCleanup:
     """Tests for stale entry cleanup on file deletion/modification."""
 
     @patch("knowlin_mcp.db.KnowledgeDB")
-    def test_deleted_session_entries_removed(self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl):
+    def test_deleted_session_entries_removed(
+        self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl
+    ):
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["id1"]
         mock_db.remove_entries.return_value = 1
@@ -588,7 +611,9 @@ class TestCleanup:
         assert len(ingester2._registry) == 0
 
     @patch("knowlin_mcp.db.KnowledgeDB")
-    def test_modified_session_old_entries_replaced(self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl):
+    def test_modified_session_old_entries_replaced(
+        self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl
+    ):
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["id1"]
         mock_db.remove_entries.return_value = 1
@@ -620,7 +645,9 @@ class TestCleanup:
         mock_db.remove_entries.assert_called_with(["id1"])
 
     @patch("knowlin_mcp.db.KnowledgeDB")
-    def test_backward_compat_no_entry_ids(self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl):
+    def test_backward_compat_no_entry_ids(
+        self, mock_db_cls, project_with_sessions, session_dir, sample_jsonl
+    ):
         """Old registries without entry_ids should not crash."""
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["id1"]

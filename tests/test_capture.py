@@ -68,7 +68,8 @@ class TestCreateEntryFromJson:
     def test_infers_type_when_missing(self):
         data = {"title": "Be careful with timeouts", "insight": "Watch out for TCP timeout"}
         entry = create_entry_from_json(data)
-        assert entry["type"] in ("finding", "warning", "solution", "pattern", "decision", "discovery")
+        valid_types = ("finding", "warning", "solution", "pattern", "decision", "discovery")
+        assert entry["type"] in valid_types
 
     def test_merges_tags_and_concepts(self):
         data = {

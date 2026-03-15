@@ -133,8 +133,14 @@ class TestStatsCommand:
 
         mock_ms = MagicMock()
         mock_ms.stats.return_value = {
-            "kb": {"count": 10, "available": True, "size_human": "5.2 KB", "last_updated": "2026-03-04"},
-            "sessions": {"count": 5, "available": True, "size_human": "2.1 KB", "last_updated": "2026-03-04"},
+            "kb": {
+                "count": 10, "available": True,
+                "size_human": "5.2 KB", "last_updated": "2026-03-04",
+            },
+            "sessions": {
+                "count": 5, "available": True,
+                "size_human": "2.1 KB", "last_updated": "2026-03-04",
+            },
             "docs": {"count": 0, "available": False},
         }
         mock_ms_cls.return_value = mock_ms
@@ -151,7 +157,10 @@ class TestStatsCommand:
 
         mock_ms = MagicMock()
         mock_ms.stats.return_value = {
-            "kb": {"count": 10, "available": True, "size_human": "5.2 KB", "last_updated": "2026-03-04"},
+            "kb": {
+                "count": 10, "available": True,
+                "size_human": "5.2 KB", "last_updated": "2026-03-04",
+            },
             "sessions": {"count": 0, "available": False},
             "docs": {"count": 0, "available": False},
         }

@@ -22,7 +22,13 @@ def bench_db(tmp_path_factory):
 
     db = KnowledgeDB(str(project))
     entries = [
-        {"title": f"Knowledge entry number {i} about topic {i % 10}", "insight": f"Detailed content for entry {i} covering various aspects of software engineering topic {i % 10}"}
+        {
+            "title": f"Knowledge entry number {i} about topic {i % 10}",
+            "insight": (
+                f"Detailed content for entry {i} covering various aspects"
+                f" of software engineering topic {i % 10}"
+            ),
+        }
         for i in range(50)
     ]
     db.batch_add(entries, check_duplicates=False)
@@ -34,7 +40,9 @@ class TestSearchLatency:
 
     def test_dense_search_latency(self, benchmark, bench_db):
         """Target: <100ms for dense-only search."""
-        result = benchmark(bench_db.search, "database optimization performance", limit=5, rerank=False)
+        result = benchmark(
+            bench_db.search, "database optimization performance", limit=5, rerank=False
+        )
         assert len(result) > 0
 
     def test_search_with_filters_latency(self, benchmark, bench_db):

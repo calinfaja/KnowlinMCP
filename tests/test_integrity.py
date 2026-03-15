@@ -22,7 +22,10 @@ def populated_db(tmp_path):
 
     db = KnowledgeDB(str(project))
     db.add(
-        {"title": "BLE power optimization", "insight": "Use Nordic sleep modes to reduce current draw"},
+        {
+            "title": "BLE power optimization",
+            "insight": "Use Nordic sleep modes to reduce current draw",
+        },
         check_duplicates=False,
     )
     db.add(

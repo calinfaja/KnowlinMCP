@@ -14,8 +14,8 @@ src/knowlin_mcp/          # 15 files, 5,175 lines
   search.py         141L  # Output formatters (compact/detailed/inject/json)
   capture.py        227L  # Entry creation + save with fallback chain (server->DB->JSONL)
   server.py         476L  # TCP daemon (KnowledgeServer, 1hr idle TTL, ~30ms queries)
-  mcp_server.py     262L  # FastMCP server (4 tools: search, get, stats, ingest)
-  cli.py            765L  # Click CLI (search, capture, server, ingest, stats, doctor, init)
+  mcp_server.py     262L  # FastMCP server (5 tools: search, get, stats, ingest, capture)
+  cli.py            940L  # Click CLI (search, capture, list, get, delete, export, server, ingest, stats, doctor, init)
   ingest_docs.py    515L  # DocsIngester: markdown/PDF chunking into docs/ sub-store
   ingest_sessions.py 507L # SessionIngester: Claude Code JSONL extraction with scoring
   ingest_codex.py   307L  # CodexIngester: Codex CLI JSONL extraction
@@ -33,7 +33,7 @@ docs/INDEX.md             # Detailed architecture reference (667 lines)
 
 ## Architecture (5-line summary)
 
-Hybrid semantic knowledge DB. Three sub-stores (kb, sessions, docs) each with JSONL + numpy embeddings + SPLADE++ sparse index. Query pipeline: intent classification -> per-source dense+sparse+RRF search -> weighted cross-source RRF -> title dedup -> cross-encoder rerank. Writes use fallback chain (TCP server -> direct DB -> raw JSONL). Incremental ingestion via SHA-256 file hashing with registry files.
+Hybrid semantic knowledge DB. Three sub-stores (kb, sessions, docs) each with JSONL + numpy embeddings + SPLADE++ sparse index with inverted index for sub-linear sparse search. Query pipeline: intent classification -> per-source dense+sparse+RRF search -> weighted cross-source RRF -> title dedup -> cross-encoder rerank. Writes use fallback chain (TCP server -> direct DB -> raw JSONL). Incremental ingestion via SHA-256 file hashing with registry files.
 
 ## Key Classes
 
@@ -56,6 +56,7 @@ Hybrid semantic knowledge DB. Three sub-stores (kb, sessions, docs) each with JS
 | `get_dense_model()` | models.py | Lazy-load BGE-small-en-v1.5 (384-dim) |
 | `get_sparse_model()` | models.py | Lazy-load SPLADE++ |
 | `migrate_entry()` | utils.py | V2->V3 schema migration |
+| `knowlin_capture()` | mcp_server.py | MCP tool: save new knowledge entries via MCP clients |
 
 ## Dependencies
 
@@ -72,8 +73,8 @@ Dev: pytest, pytest-cov, pytest-benchmark, hypothesis, ranx, ruff, black
 ## Dependency Layers
 
 ```
-L0: platform.py, models.py         (no internal deps)
-L1: utils.py, query_utils.py
+L0: platform.py                    (no internal deps)
+L1: utils.py, query_utils.py, models.py
 L2: db.py, search.py
 L3: multi_search.py, capture.py, server.py
 L4: ingest_docs.py, ingest_sessions.py, ingest_codex.py
@@ -82,7 +83,7 @@ L5: cli.py, mcp_server.py          (top-level entry points)
 
 ## Testing
 
-18 test files | Markers: `@integration` (real models), `@benchmark` (perf)
+18 test files | 344 tests | Markers: `@integration` (real models), `@benchmark` (perf)
 Fixtures: `temp_kb_dir`, `sample_entries`, `kb_with_entries`, `project_root`
 Run: `.venv/bin/pytest tests/ -v` | Integration: `--integration` | Coverage: `--cov=knowlin_mcp`
 
@@ -91,6 +92,10 @@ Run: `.venv/bin/pytest tests/ -v` | Integration: `--integration` | Coverage: `--
 ```bash
 .venv/bin/knowlin search "query"          # Search all sources
 .venv/bin/knowlin capture "content"       # Add entry
+.venv/bin/knowlin list                    # List recent entries
+.venv/bin/knowlin get <id>                # Get full entry details
+.venv/bin/knowlin delete <id>             # Remove an entry
+.venv/bin/knowlin export                  # Export entries to JSONL/JSON
 .venv/bin/knowlin ingest all              # Ingest docs + sessions + codex
 .venv/bin/knowlin server start            # Start TCP daemon
 .venv/bin/knowlin doctor --fix            # Health check + repair

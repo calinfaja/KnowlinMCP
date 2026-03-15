@@ -54,7 +54,8 @@ class TestGetServerPort:
         project = tmp_path / "project"
         project.mkdir()
 
-        with patch("knowlin_mcp.utils.get_kb_port_file", return_value=tmp_path / "nonexistent.port"):
+        nonexistent = tmp_path / "nonexistent.port"
+        with patch("knowlin_mcp.utils.get_kb_port_file", return_value=nonexistent):
             result = get_server_port(project)
             assert result is None
 

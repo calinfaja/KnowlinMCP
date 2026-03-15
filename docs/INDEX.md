@@ -132,7 +132,9 @@ The central class `KnowledgeDB` manages one sub-store's data. Handles JSONL pers
 
 **Search internals:**
 - `_dense_search(query, limit)`: Cosine similarity on numpy array
-- `_sparse_search(query, limit)`: Dot product on sparse token weights
+- `_sparse_search(query, limit)`: Dot product on sparse token weights via inverted index (sub-linear in corpus size)
+- `_rebuild_inverted_index()`: Build posting lists from sparse vectors for sub-linear search
+- `_index_sparse_row(row_idx, vec)`: Add single doc to inverted index
 - `_rerank_results(query, results, limit)`: Cross-encoder re-scoring
 - `rrf_score(ranks, k=60)`: Reciprocal Rank Fusion formula: `sum(1/(k+rank) for rank in ranks)`
 - `_build_searchable_text(entry)`: Concatenates title + insight + keywords for embedding
@@ -217,6 +219,7 @@ FastMCP server exposing tools via stdio transport for MCP-compatible clients.
 - `knowlin_get` -- fetch single entry by ID
 - `knowlin_stats` -- database statistics
 - `knowlin_ingest` -- trigger bulk ingestion
+- `knowlin_capture` -- save new knowledge entries (title, insight, type, keywords, priority)
 
 **Functions:**
 - `_get_project_root()` -- resolve project root from `KNOWLIN_PROJECT` env or CWD
@@ -338,6 +341,10 @@ Click-based CLI with `knowlin` entry point.
 **Command groups:**
 - `knowlin search` -- search with multi-source, filters, formatters
 - `knowlin capture` -- create entries (text or JSON input)
+- `knowlin list` -- list recent entries across sources
+- `knowlin get <id>` -- get full entry details
+- `knowlin delete <id>` -- remove an entry
+- `knowlin export` -- export entries to JSONL/JSON
 - `knowlin server {start|stop|status}` -- daemon management
 - `knowlin ingest {sessions|codex|docs|all}` -- bulk ingestion
 - `knowlin stats [--json]` -- database statistics
@@ -563,7 +570,7 @@ sessions:
 
 ## Test Architecture
 
-### Test Files (17 files)
+### Test Files (18 files)
 
 | Test File | Tests | Focus |
 |-----------|-------|-------|
@@ -584,6 +591,7 @@ sessions:
 | `test_benchmarks.py` | Performance | pytest-benchmark timing |
 | `test_retrieval.py` | Retrieval quality | Search relevance metrics |
 | `test_pdf_ingestion.py` | PDF support | pymupdf4llm integration |
+| `test_migration.py` | Schema migration | V2->V3 field mapping, 40 tests |
 
 ### Fixtures (conftest.py)
 
@@ -649,6 +657,7 @@ db.py
   -> platform.py (find_project_root)
 
 models.py
+  -> utils.py (debug_log)
   -> (fastembed: TextEmbedding, SparseTextEmbedding, TextCrossEncoder)
 
 utils.py
@@ -658,8 +667,8 @@ utils.py
 ### Dependency Layers
 
 ```
-Layer 0 (no internal deps):  platform.py, models.py
-Layer 1:                      utils.py, query_utils.py
+Layer 0 (no internal deps):  platform.py
+Layer 1:                      utils.py, query_utils.py, models.py
 Layer 2:                      db.py, search.py
 Layer 3:                      multi_search.py, capture.py, server.py
 Layer 4:                      ingest_docs.py, ingest_sessions.py, ingest_codex.py

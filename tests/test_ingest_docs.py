@@ -98,7 +98,10 @@ class TestChunkByHeadings:
 
     def test_splits_at_headings(self):
         ingester = DocsIngester.__new__(DocsIngester)
-        text = "# Title\n\nIntro paragraph with enough content to pass minimum.\n\n## Section\n\nSection content that is also long enough to be meaningful here."
+        text = (
+            "# Title\n\nIntro paragraph with enough content to pass minimum."
+            "\n\n## Section\n\nSection content that is also long enough to be meaningful here."
+        )
         chunks = ingester._chunk_by_headings(text, "test.md")
         assert len(chunks) >= 1
 
@@ -108,7 +111,8 @@ class TestChunkByHeadings:
         text = (
             "# Main\n\nIntro text that is long enough to be a chunk.\n\n"
             "## Sub\n\nSub content that is also long enough to pass the minimum threshold.\n\n"
-            "### Subsub\n\nDeep content that should have full hierarchy prepended for contextual retrieval."
+            "### Subsub\n\nDeep content that should have full hierarchy"
+            " prepended for contextual retrieval."
         )
         chunks = ingester._chunk_by_headings(text, "test.md")
         # Find the deepest chunk - hierarchy is in context_prefix, content in insight
@@ -119,7 +123,10 @@ class TestChunkByHeadings:
 
     def test_skips_tiny_chunks(self):
         ingester = DocsIngester.__new__(DocsIngester)
-        text = "# Title\n\nOK\n\n## Next\n\nThis section has enough content to be meaningful and pass the minimum character threshold for chunking."
+        text = (
+            "# Title\n\nOK\n\n## Next\n\nThis section has enough content to be meaningful"
+            " and pass the minimum character threshold for chunking."
+        )
         chunks = ingester._chunk_by_headings(text, "test.md")
         # "OK" is too short, should be skipped
         for chunk in chunks:
@@ -146,7 +153,11 @@ class TestChunkByHeadings:
     def test_chunk_insight_capped_at_max(self):
         ingester = DocsIngester.__new__(DocsIngester)
         # Create a very long section
-        long_text = "# Title\n\n" + "x" * (MAX_CHUNK_CHARS * 3) + "\n\n## Next\n\nShort content that is long enough to pass the minimum threshold for chunking in tests."
+        long_text = (
+            "# Title\n\n" + "x" * (MAX_CHUNK_CHARS * 3)
+            + "\n\n## Next\n\nShort content that is long enough to pass"
+            " the minimum threshold for chunking in tests."
+        )
         chunks = ingester._chunk_by_headings(long_text, "test.md")
         for chunk in chunks:
             assert len(chunk["insight"]) <= MAX_CHUNK_CHARS
@@ -202,7 +213,10 @@ class TestRecursiveSplit:
 
     def test_falls_back_to_finer_separators(self):
         ingester = DocsIngester.__new__(DocsIngester)
-        text = "This is a single paragraph with no double newlines but several sentences. It should split on sentences. Like this one here."
+        text = (
+            "This is a single paragraph with no double newlines but several sentences."
+            " It should split on sentences. Like this one here."
+        )
         result = ingester._recursive_split(text, ["\n\n", "\n", ". "], 60)
         assert len(result) >= 2
 
@@ -367,7 +381,9 @@ class TestIngest:
         assert count == 0
 
     @patch("knowlin_mcp.db.KnowledgeDB")
-    def test_full_reprocesses_changed_content(self, mock_db_cls, tmp_path, docs_dir, sample_markdown):
+    def test_full_reprocesses_changed_content(
+        self, mock_db_cls, tmp_path, docs_dir, sample_markdown
+    ):
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["id1"]
         mock_db_cls.return_value = mock_db
@@ -478,13 +494,17 @@ class TestCleanup:
         (project / ".knowledge-db").mkdir()
 
         doc = docs_dir / "guide.md"
-        doc.write_text("# Original\n\nOriginal content that is long enough to pass minimum threshold.")
+        doc.write_text(
+            "# Original\n\nOriginal content that is long enough to pass minimum threshold."
+        )
 
         ingester = DocsIngester(str(project), docs_path=str(docs_dir))
         ingester.ingest()
 
         # Modify the file
-        doc.write_text("# Updated\n\nCompletely different content that replaces the original version entirely.")
+        doc.write_text(
+            "# Updated\n\nCompletely different content that replaces the original version entirely."
+        )
 
         # New batch_add returns new IDs
         mock_db.batch_add.return_value = ["id2"]

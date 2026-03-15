@@ -9,8 +9,9 @@ Per-project knowledge database with hybrid semantic search, exposed as an MCP se
   | Gemini    |<--->|   (stdio)         |<--->|   entries.jsonl
   | Codex     |     |  knowlin_search   |     |   embeddings.npy
   | Cursor    |     |  knowlin_get      |     |   sessions/
-  | VS Code   |     |  knowlin_stats    |     |   docs/
-  +-----------+     |  knowlin_ingest   |     +-----------+
+  | VS Code   |     |  knowlin_capture  |     |   docs/
+  +-----------+     |  knowlin_stats    |     +-----------+
+                    |  knowlin_ingest   |
                     +-------------------+
                             |
   +-------------------------+-------------------------+
@@ -109,6 +110,7 @@ knowlin ingest all --full       # force re-process everything
 knowlin list                    # recent entries across all sources
 knowlin get <id>                # full details of an entry
 knowlin delete <id>             # remove an entry
+knowlin export                  # export entries as JSONL (pipeable)
 
 # Admin
 knowlin init                    # set up project (.knowledge-db/ + .mcp.json)
