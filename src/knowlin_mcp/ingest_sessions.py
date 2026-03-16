@@ -445,13 +445,6 @@ class SessionIngester:
 
         db = KnowledgeDB(str(self.project_path), sub_store="sessions")
 
-        # Remove old entries for files being re-processed
-        for path in to_process:
-            old_ids = self._registry.get(str(path), {}).get("entry_ids", [])
-            if old_ids:
-                db.remove_entries(old_ids)
-                debug_log(f"Removed {len(old_ids)} old entries for {path.name}")
-
         # Extract entries from all files
         all_entries = []
         file_entry_counts: list[tuple[str, int]] = []
@@ -478,8 +471,14 @@ class SessionIngester:
         for e in all_entries:
             e.pop("_importance_score", None)
 
-        # Batch add to sessions sub-store
+        # Batch add first, then remove old entries (crash-safe ordering)
         ids = db.batch_add(all_entries, check_duplicates=False)
+
+        for path in to_process:
+            old_ids = self._registry.get(str(path), {}).get("entry_ids", [])
+            if old_ids:
+                db.remove_entries(old_ids)
+                debug_log(f"Removed {len(old_ids)} old entries for {path.name}")
 
         # Guard: batch_add may silently filter entries
         total_expected = sum(c for _, c in file_entry_counts)

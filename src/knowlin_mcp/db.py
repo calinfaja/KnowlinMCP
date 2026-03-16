@@ -16,6 +16,7 @@ Search pipeline:
 from __future__ import annotations
 
 import json
+import os
 import re
 import uuid
 from datetime import datetime
@@ -236,10 +237,12 @@ class KnowledgeDB:
         return entries
 
     def _write_jsonl(self, entries: list[dict[str, Any]]) -> None:
-        """Rewrite JSONL file with the given entries."""
-        with open(self.jsonl_path, "w") as f:
+        """Atomically rewrite JSONL file (write-to-temp + rename)."""
+        tmp = self.jsonl_path.with_suffix(".jsonl.tmp")
+        with open(tmp, "w") as f:
             for e in entries:
                 f.write(json.dumps(e) + "\n")
+        os.replace(tmp, self.jsonl_path)
 
     def _append_jsonl(self, entry: dict[str, Any]) -> None:
         """Append a single entry to JSONL."""

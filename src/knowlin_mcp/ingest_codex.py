@@ -259,11 +259,6 @@ class CodexIngester:
 
         db = KnowledgeDB(str(self.project_path), sub_store="sessions")
 
-        for path in to_process:
-            old_ids = self._registry.get(str(path), {}).get("entry_ids", [])
-            if old_ids:
-                db.remove_entries(old_ids)
-
         all_entries = []
         file_entry_counts: list[tuple[str, int]] = []
 
@@ -288,7 +283,13 @@ class CodexIngester:
         for e in all_entries:
             e.pop("_importance_score", None)
 
+        # Batch add first, then remove old entries (crash-safe ordering)
         ids = db.batch_add(all_entries, check_duplicates=False)
+
+        for path in to_process:
+            old_ids = self._registry.get(str(path), {}).get("entry_ids", [])
+            if old_ids:
+                db.remove_entries(old_ids)
 
         offset = 0
         for file_key, count in file_entry_counts:
