@@ -876,6 +876,10 @@ docs:
 sessions:
   auto_discover: true          # scan ~/.claude/projects/ automatically
   # path: ~/custom/sessions/  # explicit override (disables auto-discover)
+
+codex:
+  auto_discover: true          # scan ~/.codex/sessions/ automatically
+  # path: ~/.codex/sessions/   # explicit override
 """
 
 

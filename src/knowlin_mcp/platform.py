@@ -92,6 +92,12 @@ def get_kb_pid_file(project_path: Path) -> Path:
     return get_runtime_dir() / f"kb-{project_hash}.pid"
 
 
+def get_kb_token_file(project_path: Path) -> Path:
+    """Get path to the knowledge server auth token file for a project."""
+    project_hash = get_project_hash(project_path)
+    return get_runtime_dir() / f"kb-{project_hash}.token"
+
+
 def find_project_root(start_path: Path | None = None) -> Path | None:
     """Find the project root by looking for markers.
 
@@ -244,6 +250,7 @@ def cleanup_stale_files(project_path: Path) -> None:
     """Remove stale PID and port files if process is dead."""
     pid_file = get_kb_pid_file(project_path)
     port_file = get_kb_port_file(project_path)
+    token_file = get_kb_token_file(project_path)
 
     pid = read_pid_file(pid_file)
     if pid and not is_process_running(pid):
@@ -253,5 +260,9 @@ def cleanup_stale_files(project_path: Path) -> None:
             pass
         try:
             port_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+        try:
+            token_file.unlink(missing_ok=True)
         except OSError:
             pass

@@ -39,6 +39,9 @@ git clone https://github.com/calinfaja/KnowlinMCP.git && cd KnowlinMCP
 ./install.sh --with-pdf   # also install PDF ingestion
 ```
 
+> **Note**: PDF support uses `pymupdf4llm` which is licensed under AGPL-3.0.
+> The core KnowlinMCP package (MIT) does not include or require it.
+
 Or manually:
 ```bash
 pip install -e ".[mcp]"

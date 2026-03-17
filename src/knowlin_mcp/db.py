@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -102,6 +103,7 @@ class KnowledgeDB:
         self._dense_model: Optional[TextEmbedding] = None
         self._sparse_model = None
         self._reranker = None
+        self._lock = threading.RLock()
 
         # In-memory index
         self._embeddings: Optional[np.ndarray] = None
@@ -227,7 +229,10 @@ class KnowledgeDB:
 
     def _save_index(self) -> None:
         """Save embeddings, sparse vectors, and index to disk."""
-        if self._embeddings is not None:
+        with self._lock:
+            if self._embeddings is None:
+                return
+
             sparse_data = {str(k): v for k, v in self._sparse_vectors.items()}
 
             def write_embeddings(tmp_path: Path) -> None:
@@ -336,29 +341,48 @@ class KnowledgeDB:
             else:
                 posting.append((row_idx, weight))
 
-    def _dense_search(self, query: str, limit: int) -> list[tuple]:
+    def _dense_search(
+        self,
+        query: str,
+        limit: int,
+        embeddings: Optional[np.ndarray] = None,
+    ) -> list[tuple]:
         """Dense (semantic) search using cosine similarity."""
-        if self._embeddings is None or len(self._embeddings) == 0:
+        if embeddings is None:
+            with self._lock:
+                embeddings = self._embeddings
+        if embeddings is None or len(embeddings) == 0:
             return []
 
         query_embedding = list(self.dense_model.embed([query]))[0]
-        scores = self._embeddings @ query_embedding
+        scores = embeddings @ query_embedding
         top_indices = np.argsort(scores)[::-1][:limit]
         return [(int(idx), float(scores[idx])) for idx in top_indices]
 
-    def _sparse_search(self, query: str, limit: int) -> list[tuple]:
+    def _sparse_search(
+        self,
+        query: str,
+        limit: int,
+        inverted_index: dict[str, list[tuple[int, float]]] | None = None,
+    ) -> list[tuple]:
         """Sparse (keyword) search using SPLADE++ inverted index."""
-        if not self._inverted_index:
-            return []
-
         query_sparse = self._generate_sparse_embedding(query)
         if not query_sparse:
+            return []
+        if inverted_index is None:
+            with self._lock:
+                if not self._inverted_index:
+                    return []
+                inverted_index = {
+                    token: postings[:] for token, postings in self._inverted_index.items()
+                }
+        elif not inverted_index:
             return []
 
         # Accumulate scores by traversing posting lists (sub-linear in corpus size)
         acc: dict[int, float] = {}
         for token, q_weight in query_sparse.items():
-            posting = self._inverted_index.get(token)
+            posting = inverted_index.get(token)
             if posting:
                 for doc_idx, d_weight in posting:
                     acc[doc_idx] = acc.get(doc_idx, 0.0) + q_weight * d_weight
@@ -395,91 +419,94 @@ class KnowledgeDB:
 
         Returns entry ID (new or existing if duplicate detected).
         """
-        if "title" not in entry:
-            raise ValueError("Entry must have 'title' field")
-        if "insight" not in entry and "summary" not in entry:
-            raise ValueError("Entry must have 'insight' field (or 'summary' for V2 compat)")
+        with self._lock:
+            if "title" not in entry:
+                raise ValueError("Entry must have 'title' field")
+            if "insight" not in entry and "summary" not in entry:
+                raise ValueError("Entry must have 'insight' field (or 'summary' for V2 compat)")
 
-        # Reject low-quality entries
-        title = entry.get("title", "").strip()
-        if len(title) < 5 or len(title.split()) < 2:
-            debug_log(f"Rejected entry with short title: '{title[:50]}'")
-            return ""
-
-        garbage_patterns = [
-            r"^Session (?:started|ended|log)",
-            r"^Docs?: .+ - ",
-            r"^Documentation (?:reference|page)",
-            r"^https?://",
-            r"^Untitled",
-        ]
-        for pat in garbage_patterns:
-            if re.match(pat, title, re.IGNORECASE):
-                debug_log(f"Rejected garbage pattern '{pat}': '{title[:50]}'")
+            # Reject low-quality entries
+            title = entry.get("title", "").strip()
+            if len(title) < 5 or len(title.split()) < 2:
+                debug_log(f"Rejected entry with short title: '{title[:50]}'")
                 return ""
 
-        # Semantic deduplication (threshold 0.92)
-        if check_duplicates and self._entries and self._embeddings is not None:
-            query_text = (
-                f"{entry.get('title', '')} {entry.get('insight', entry.get('summary', ''))}"
-            )
-            try:
-                query_vec = get_dense_embedding(query_text)
-                if query_vec is not None and len(self._embeddings) > 0:
-                    similarities = np.dot(self._embeddings, query_vec)
-                    max_sim = float(np.max(similarities))
-                    if max_sim > self.DEDUP_THRESHOLD:
-                        idx = int(np.argmax(similarities))
-                        existing_id = self._entries[idx].get("id")
-                        debug_log(f"Duplicate detected (sim={max_sim:.3f}): {existing_id}")
-                        return str(existing_id) if existing_id else ""
-            except Exception as e:
-                debug_log(f"Dedup check failed (proceeding with add): {e}")
+            garbage_patterns = [
+                r"^Session (?:started|ended|log)",
+                r"^Docs?: .+ - ",
+                r"^Documentation (?:reference|page)",
+                r"^https?://",
+                r"^Untitled",
+            ]
+            for pat in garbage_patterns:
+                if re.match(pat, title, re.IGNORECASE):
+                    debug_log(f"Rejected garbage pattern '{pat}': '{title[:50]}'")
+                    return ""
 
-        entry_id = entry.get("id") or str(uuid.uuid4())
-        entry["id"] = entry_id
+            # Semantic deduplication (threshold 0.92)
+            if check_duplicates and self._entries and self._embeddings is not None:
+                query_text = (
+                    f"{entry.get('title', '')} {entry.get('insight', entry.get('summary', ''))}"
+                )
+                try:
+                    query_vec = get_dense_embedding(query_text)
+                    if query_vec is not None and len(self._embeddings) > 0:
+                        similarities = np.dot(self._embeddings, query_vec)
+                        max_sim = float(np.max(similarities))
+                        if max_sim > self.DEDUP_THRESHOLD:
+                            idx = int(np.argmax(similarities))
+                            existing_id = self._entries[idx].get("id")
+                            debug_log(f"Duplicate detected (sim={max_sim:.3f}): {existing_id}")
+                            return str(existing_id) if existing_id else ""
+                except Exception as e:
+                    debug_log(f"Dedup check failed (proceeding with add): {e}")
 
-        if "date" not in entry:
-            entry["date"] = entry.get("found_date", "")[:10] or datetime.now().strftime("%Y-%m-%d")
+            entry_id = entry.get("id") or str(uuid.uuid4())
+            entry["id"] = entry_id
 
-        if "insight" not in entry and "summary" in entry:
-            entry["insight"] = entry["summary"]
-        if "keywords" not in entry and "tags" in entry:
-            entry["keywords"] = entry["tags"]
+            if "date" not in entry:
+                entry["date"] = entry.get("found_date", "")[:10] or datetime.now().strftime(
+                    "%Y-%m-%d"
+                )
 
-        entry.setdefault("type", "finding")
-        entry.setdefault("priority", "medium")
-        entry.setdefault("keywords", [])
-        entry.setdefault("source", f"conv:{entry['date']}")
-        entry.setdefault("timestamp", datetime.now().isoformat())
-        entry.setdefault("branch", "")
-        entry.setdefault("related_to", [])
-        entry.setdefault("pinned", entry.get("priority") == "critical")
+            if "insight" not in entry and "summary" in entry:
+                entry["insight"] = entry["summary"]
+            if "keywords" not in entry and "tags" in entry:
+                entry["keywords"] = entry["tags"]
 
-        searchable_text = self._build_searchable_text(entry)
-        embedding = list(self.dense_model.embed([searchable_text]))[0]
+            entry.setdefault("type", "finding")
+            entry.setdefault("priority", "medium")
+            entry.setdefault("keywords", [])
+            entry.setdefault("source", f"conv:{entry['date']}")
+            entry.setdefault("timestamp", datetime.now().isoformat())
+            entry.setdefault("branch", "")
+            entry.setdefault("related_to", [])
+            entry.setdefault("pinned", entry.get("priority") == "critical")
 
-        # Write JSONL first (source of truth), then update in-memory index
-        self._append_jsonl(entry)
+            searchable_text = self._build_searchable_text(entry)
+            embedding = list(self.dense_model.embed([searchable_text]))[0]
 
-        if self._embeddings is None:
-            self._embeddings = embedding.reshape(1, -1)
-        else:
-            self._embeddings = np.vstack([self._embeddings, embedding])
+            # Write JSONL first (source of truth), then update in-memory index
+            self._append_jsonl(entry)
 
-        row_idx = len(self._id_to_row)
-        self._id_to_row[entry_id] = row_idx
-        self._row_to_id[row_idx] = entry_id
-        self._entries.append(entry)
+            if self._embeddings is None:
+                self._embeddings = embedding.reshape(1, -1)
+            else:
+                self._embeddings = np.vstack([self._embeddings, embedding])
 
-        sparse_vec = self._generate_sparse_embedding(searchable_text)
-        if sparse_vec:
-            self._sparse_vectors[row_idx] = sparse_vec
-            self._index_sparse_row(row_idx, sparse_vec)
+            row_idx = len(self._id_to_row)
+            self._id_to_row[entry_id] = row_idx
+            self._row_to_id[row_idx] = entry_id
+            self._entries.append(entry)
 
-        self._save_index()
+            sparse_vec = self._generate_sparse_embedding(searchable_text)
+            if sparse_vec:
+                self._sparse_vectors[row_idx] = sparse_vec
+                self._index_sparse_row(row_idx, sparse_vec)
 
-        return entry_id
+            self._save_index()
+
+            return entry_id
 
     def batch_add(
         self, entries: list[dict[str, Any]], check_duplicates: bool = False
@@ -493,124 +520,128 @@ class KnowledgeDB:
         Returns:
             List of entry IDs aligned to input entries. Rejected entries return None.
         """
-        if not entries:
-            return []
+        with self._lock:
+            if not entries:
+                return []
 
-        # Validate and prepare entries
-        valid_entries = []
-        accepted_indexes = []
-        result_ids: list[str | None] = [None] * len(entries)
-        for idx, entry in enumerate(entries):
-            if not entry.get("title") or ("insight" not in entry and "summary" not in entry):
-                continue
+            # Validate and prepare entries
+            valid_entries = []
+            accepted_indexes = []
+            result_ids: list[str | None] = [None] * len(entries)
+            for idx, entry in enumerate(entries):
+                if not entry.get("title") or ("insight" not in entry and "summary" not in entry):
+                    continue
 
-            title = entry.get("title", "").strip()
-            if len(title) < 5 or len(title.split()) < 2:
-                continue
+                title = entry.get("title", "").strip()
+                if len(title) < 5 or len(title.split()) < 2:
+                    continue
 
-            entry_id = entry.get("id") or str(uuid.uuid4())
-            entry["id"] = entry_id
-            if "date" not in entry:
-                entry["date"] = datetime.now().strftime("%Y-%m-%d")
-            if "insight" not in entry and "summary" in entry:
-                entry["insight"] = entry["summary"]
-            entry.setdefault("type", "finding")
-            entry.setdefault("priority", "medium")
-            entry.setdefault("keywords", [])
-            entry.setdefault("source", f"conv:{entry['date']}")
-            entry.setdefault("timestamp", datetime.now().isoformat())
-            entry.setdefault("branch", "")
-            entry.setdefault("related_to", [])
-            entry.setdefault("pinned", False)
+                entry_id = entry.get("id") or str(uuid.uuid4())
+                entry["id"] = entry_id
+                if "date" not in entry:
+                    entry["date"] = datetime.now().strftime("%Y-%m-%d")
+                if "insight" not in entry and "summary" in entry:
+                    entry["insight"] = entry["summary"]
+                entry.setdefault("type", "finding")
+                entry.setdefault("priority", "medium")
+                entry.setdefault("keywords", [])
+                entry.setdefault("source", f"conv:{entry['date']}")
+                entry.setdefault("timestamp", datetime.now().isoformat())
+                entry.setdefault("branch", "")
+                entry.setdefault("related_to", [])
+                entry.setdefault("pinned", False)
 
-            valid_entries.append(entry)
-            accepted_indexes.append(idx)
+                valid_entries.append(entry)
+                accepted_indexes.append(idx)
 
-        if not valid_entries:
+            if not valid_entries:
+                return result_ids
+
+            # Batch embed all texts at once
+            texts = [self._build_searchable_text(e) for e in valid_entries]
+            embeddings_list = list(self.dense_model.embed(texts))
+            new_embeddings = np.array(embeddings_list)
+
+            if self._embeddings is None:
+                self._embeddings = new_embeddings
+            else:
+                self._embeddings = np.vstack([self._embeddings, new_embeddings])
+
+            # Update index
+            base_row = len(self._id_to_row)
+            for i, entry in enumerate(valid_entries):
+                row_idx = base_row + i
+                entry_id = entry["id"]
+                self._id_to_row[entry_id] = row_idx
+                self._row_to_id[row_idx] = entry_id
+                self._entries.append(entry)
+                result_ids[accepted_indexes[i]] = entry_id
+
+            # Batch sparse embeddings
+            if self.sparse_model is not None:
+                try:
+                    sparse_list = list(self.sparse_model.embed(texts))
+                    for i, sparse_emb in enumerate(sparse_list):
+                        row_idx = base_row + i
+                        vec = {}
+                        for idx, val in zip(sparse_emb.indices, sparse_emb.values):
+                            if val > self.SPARSE_MIN_WEIGHT:
+                                vec[str(idx)] = float(val)
+                        if vec:
+                            self._sparse_vectors[row_idx] = vec
+                            self._index_sparse_row(row_idx, vec)
+                except Exception as e:
+                    debug_log(f"Batch sparse embedding failed: {e}")
+
+            # Write JSONL first (source of truth), then save index
+            with open(self.jsonl_path, "a") as f:
+                for entry in valid_entries:
+                    f.write(json.dumps(entry) + "\n")
+
+            self._save_index()
+
             return result_ids
-
-        # Batch embed all texts at once
-        texts = [self._build_searchable_text(e) for e in valid_entries]
-        embeddings_list = list(self.dense_model.embed(texts))
-        new_embeddings = np.array(embeddings_list)
-
-        if self._embeddings is None:
-            self._embeddings = new_embeddings
-        else:
-            self._embeddings = np.vstack([self._embeddings, new_embeddings])
-
-        # Update index
-        base_row = len(self._id_to_row)
-        for i, entry in enumerate(valid_entries):
-            row_idx = base_row + i
-            entry_id = entry["id"]
-            self._id_to_row[entry_id] = row_idx
-            self._row_to_id[row_idx] = entry_id
-            self._entries.append(entry)
-            result_ids[accepted_indexes[i]] = entry_id
-
-        # Batch sparse embeddings
-        if self.sparse_model is not None:
-            try:
-                sparse_list = list(self.sparse_model.embed(texts))
-                for i, sparse_emb in enumerate(sparse_list):
-                    row_idx = base_row + i
-                    vec = {}
-                    for idx, val in zip(sparse_emb.indices, sparse_emb.values):
-                        if val > self.SPARSE_MIN_WEIGHT:
-                            vec[str(idx)] = float(val)
-                    if vec:
-                        self._sparse_vectors[row_idx] = vec
-                        self._index_sparse_row(row_idx, vec)
-            except Exception as e:
-                debug_log(f"Batch sparse embedding failed: {e}")
-
-        # Write JSONL first (source of truth), then save index
-        with open(self.jsonl_path, "a") as f:
-            for entry in valid_entries:
-                f.write(json.dumps(entry) + "\n")
-
-        self._save_index()
-
-        return result_ids
 
     def remove_entries(self, entry_ids: list[str]) -> int:
         """Remove entries and rebuild in-memory state.
 
         Use rebuild() to compact embeddings after removal.
         """
-        if not entry_ids:
-            return 0
+        with self._lock:
+            if not entry_ids:
+                return 0
 
-        id_set = set(entry_ids)
-        rows_to_remove = sorted(self._id_to_row[eid] for eid in id_set if eid in self._id_to_row)
-        removed = len(rows_to_remove)
+            id_set = set(entry_ids)
+            rows_to_remove = sorted(
+                self._id_to_row[eid] for eid in id_set if eid in self._id_to_row
+            )
+            removed = len(rows_to_remove)
 
-        if removed > 0:
-            rows_to_remove = set(rows_to_remove)
-            keep_rows = [idx for idx in range(len(self._entries)) if idx not in rows_to_remove]
+            if removed > 0:
+                rows_to_remove = set(rows_to_remove)
+                keep_rows = [idx for idx in range(len(self._entries)) if idx not in rows_to_remove]
 
-            self._entries = [self._entries[idx] for idx in keep_rows]
-            self._id_to_row = {entry["id"]: idx for idx, entry in enumerate(self._entries)}
-            self._row_to_id = {idx: entry["id"] for idx, entry in enumerate(self._entries)}
+                self._entries = [self._entries[idx] for idx in keep_rows]
+                self._id_to_row = {entry["id"]: idx for idx, entry in enumerate(self._entries)}
+                self._row_to_id = {idx: entry["id"] for idx, entry in enumerate(self._entries)}
 
-            if self._embeddings is not None:
-                self._embeddings = self._embeddings[keep_rows]
+                if self._embeddings is not None:
+                    self._embeddings = self._embeddings[keep_rows]
 
-            sparse_by_old_row = self._sparse_vectors
-            self._sparse_vectors = {
-                new_idx: sparse_by_old_row[old_idx]
-                for new_idx, old_idx in enumerate(keep_rows)
-                if old_idx in sparse_by_old_row
-            }
-            self._rebuild_inverted_index()
-            self._save_index()
+                sparse_by_old_row = self._sparse_vectors
+                self._sparse_vectors = {
+                    new_idx: sparse_by_old_row[old_idx]
+                    for new_idx, old_idx in enumerate(keep_rows)
+                    if old_idx in sparse_by_old_row
+                }
+                self._rebuild_inverted_index()
+                self._save_index()
 
-            # Rewrite JSONL without removed entries
-            kept = [e for e in self._read_jsonl() if e.get("id") not in id_set]
-            self._write_jsonl(kept)
+                # Rewrite JSONL without removed entries
+                kept = [e for e in self._read_jsonl() if e.get("id") not in id_set]
+                self._write_jsonl(kept)
 
-        return removed
+            return removed
 
     def search(
         self,
@@ -623,14 +654,21 @@ class KnowledgeDB:
         branch: str | None = None,
     ) -> list[dict[str, Any]]:
         """Hybrid search with RRF fusion, filtering, and optional reranking."""
-        if self._embeddings is None or len(self._embeddings) == 0:
+        with self._lock:
+            entries = list(self._entries)
+            embeddings = self._embeddings
+            inverted_index = {
+                token: postings[:] for token, postings in self._inverted_index.items()
+            }
+
+        if embeddings is None or len(embeddings) == 0:
             return []
 
         has_filters = any([date_from, date_to, entry_type, branch])
         candidate_limit = limit * (6 if has_filters else 4)
 
-        dense_results = self._dense_search(query, candidate_limit)
-        sparse_results = self._sparse_search(query, candidate_limit)
+        dense_results = self._dense_search(query, candidate_limit, embeddings=embeddings)
+        sparse_results = self._sparse_search(query, candidate_limit, inverted_index=inverted_index)
 
         dense_ranks = {row_idx: rank + 1 for rank, (row_idx, _) in enumerate(dense_results)}
         sparse_ranks = {row_idx: rank + 1 for rank, (row_idx, _) in enumerate(sparse_results)}
@@ -647,8 +685,8 @@ class KnowledgeDB:
 
         results = []
         for row_idx, rrf in rrf_scores[:candidate_limit]:
-            if row_idx < len(self._entries):
-                entry = self._entries[row_idx].copy()
+            if row_idx < len(entries):
+                entry = entries[row_idx].copy()
                 entry["score"] = rrf
                 entry["_search_meta"] = {
                     "dense_rank": dense_ranks.get(row_idx, 0),
@@ -695,8 +733,11 @@ class KnowledgeDB:
         if end_date is None:
             end_date = start_date
 
+        with self._lock:
+            entries = list(self._entries)
+
         results = []
-        for entry in self._entries:
+        for entry in entries:
             date = entry.get("date", "")
             if date and start_date <= date <= end_date:
                 results.append(entry.copy())
@@ -706,8 +747,11 @@ class KnowledgeDB:
 
     def get_timeline(self, date: str) -> list[dict[str, Any]]:
         """Return all entries for a specific day, sorted by timestamp ascending."""
+        with self._lock:
+            entries = list(self._entries)
+
         results = []
-        for entry in self._entries:
+        for entry in entries:
             if entry.get("date", "") == date:
                 results.append(entry.copy())
 
@@ -716,9 +760,12 @@ class KnowledgeDB:
 
     def get_related(self, entry_id: str) -> list[dict[str, Any]]:
         """Return entries linked via related_to (bidirectional)."""
+        with self._lock:
+            entries = list(self._entries)
+
         related_ids = set()
 
-        for entry in self._entries:
+        for entry in entries:
             if entry.get("id") == entry_id:
                 for rid in entry.get("related_to", []):
                     related_ids.add(rid)
@@ -726,7 +773,7 @@ class KnowledgeDB:
                 related_ids.add(entry.get("id", ""))
 
         results = []
-        for entry in self._entries:
+        for entry in entries:
             if entry.get("id") in related_ids:
                 results.append(entry.copy())
 
@@ -734,16 +781,20 @@ class KnowledgeDB:
 
     def get(self, entry_id: str) -> Optional[dict[str, Any]]:
         """Get a specific entry by ID (from in-memory index)."""
-        row = self._id_to_row.get(entry_id)
-        if row is not None and row < len(self._entries):
-            entry = self._entries[row]
-            if entry.get("title") != "?":  # Skip orphaned stubs
-                return entry.copy()
+        with self._lock:
+            row = self._id_to_row.get(entry_id)
+            if row is not None and row < len(self._entries):
+                entry = self._entries[row]
+                if entry.get("title") != "?":  # Skip orphaned stubs
+                    return entry.copy()
         return None
 
     def stats(self) -> dict[str, Any]:
         """Get database statistics."""
-        count = len(self._id_to_row) if self._id_to_row else 0
+        with self._lock:
+            count = len(self._id_to_row) if self._id_to_row else 0
+            sparse_entries = len(self._sparse_vectors)
+
         size_bytes = 0
 
         for f in self.db_path.rglob("*"):
@@ -762,81 +813,83 @@ class KnowledgeDB:
             "db_path": str(self.db_path),
             "sub_store": self.sub_store,
             "backend": "fastembed-hybrid",
-            "has_sparse_index": len(self._sparse_vectors) > 0,
-            "sparse_entries": len(self._sparse_vectors),
+            "has_sparse_index": sparse_entries > 0,
+            "sparse_entries": sparse_entries,
         }
 
     def rebuild_index(self, dense_only: bool = False, batch_size: int = 50) -> int:
         """Rebuild the index from JSONL backup."""
-        if not self.jsonl_path.exists():
-            return 0
+        with self._lock:
+            if not self.jsonl_path.exists():
+                return 0
 
-        entries = self._read_jsonl(migrate=True)
-        if not entries:
-            return 0
+            entries = self._read_jsonl(migrate=True)
+            if not entries:
+                return 0
 
-        needs_id_update = False
-        for entry in entries:
-            if not entry.get("id"):
-                entry["id"] = str(uuid.uuid4())
-                needs_id_update = True
+            needs_id_update = False
+            for entry in entries:
+                if not entry.get("id"):
+                    entry["id"] = str(uuid.uuid4())
+                    needs_id_update = True
 
-        if needs_id_update:
-            self._write_jsonl(entries)
+            if needs_id_update:
+                self._write_jsonl(entries)
 
-        texts = [self._build_searchable_text(e) for e in entries]
+            texts = [self._build_searchable_text(e) for e in entries]
 
-        debug_log(f"Generating dense embeddings for {len(texts)} entries...")
-        embeddings_list = list(self.dense_model.embed(texts))
-        self._embeddings = np.array(embeddings_list)
+            debug_log(f"Generating dense embeddings for {len(texts)} entries...")
+            embeddings_list = list(self.dense_model.embed(texts))
+            self._embeddings = np.array(embeddings_list)
 
-        self._sparse_vectors = {}
-        if dense_only:
-            debug_log("Skipping sparse embeddings (dense-only mode)")
-        elif self.sparse_model is not None:
-            debug_log(f"Generating sparse embeddings for {len(texts)} entries...")
-            try:
-                for batch_start in range(0, len(texts), batch_size):
-                    batch_end = min(batch_start + batch_size, len(texts))
-                    batch_texts = texts[batch_start:batch_end]
+            self._sparse_vectors = {}
+            if dense_only:
+                debug_log("Skipping sparse embeddings (dense-only mode)")
+            elif self.sparse_model is not None:
+                debug_log(f"Generating sparse embeddings for {len(texts)} entries...")
+                try:
+                    for batch_start in range(0, len(texts), batch_size):
+                        batch_end = min(batch_start + batch_size, len(texts))
+                        batch_texts = texts[batch_start:batch_end]
 
-                    sparse_list = list(self.sparse_model.embed(batch_texts))
-                    for local_idx, sparse_emb in enumerate(sparse_list):
-                        global_idx = batch_start + local_idx
-                        vec = {}
-                        for token_idx, val in zip(sparse_emb.indices, sparse_emb.values):
-                            if val > self.SPARSE_MIN_WEIGHT:
-                                vec[str(token_idx)] = float(val)
-                        if vec:
-                            self._sparse_vectors[global_idx] = vec
-            except Exception as e:
-                debug_log(f"Sparse embedding failed (continuing with dense only): {e}")
+                        sparse_list = list(self.sparse_model.embed(batch_texts))
+                        for local_idx, sparse_emb in enumerate(sparse_list):
+                            global_idx = batch_start + local_idx
+                            vec = {}
+                            for token_idx, val in zip(sparse_emb.indices, sparse_emb.values):
+                                if val > self.SPARSE_MIN_WEIGHT:
+                                    vec[str(token_idx)] = float(val)
+                            if vec:
+                                self._sparse_vectors[global_idx] = vec
+                except Exception as e:
+                    debug_log(f"Sparse embedding failed (continuing with dense only): {e}")
 
-        self._id_to_row = {}
-        self._row_to_id = {}
-        self._entries = entries
-        for idx, entry in enumerate(entries):
-            self._id_to_row[entry["id"]] = idx
-            self._row_to_id[idx] = entry["id"]
+            self._id_to_row = {}
+            self._row_to_id = {}
+            self._entries = entries
+            for idx, entry in enumerate(entries):
+                self._id_to_row[entry["id"]] = idx
+                self._row_to_id[idx] = entry["id"]
 
-        self._rebuild_inverted_index()
-        self._save_index()
+            self._rebuild_inverted_index()
+            self._save_index()
 
-        if self.old_txtai_path.exists():
-            import shutil
+            if self.old_txtai_path.exists():
+                import shutil
 
-            shutil.rmtree(self.old_txtai_path)
+                shutil.rmtree(self.old_txtai_path)
 
-        debug_log(f"Rebuilt index with {len(entries)} entries")
-        return len(entries)
+            debug_log(f"Rebuilt index with {len(entries)} entries")
+            return len(entries)
 
     def list_recent(self, limit: int = 10) -> list[dict[str, Any]]:
         """List most recent entries (from in-memory index)."""
-        entries = [
-            e.copy()
-            for e in self._entries
-            if e.get("title") != "?"  # Skip orphaned stubs
-        ]
+        with self._lock:
+            entries = [
+                e.copy()
+                for e in self._entries
+                if e.get("title") != "?"  # Skip orphaned stubs
+            ]
         entries.sort(
             key=lambda x: (
                 x.get("date", "") or x.get("found_date", ""),
@@ -848,35 +901,36 @@ class KnowledgeDB:
 
     def update_usage(self, entry_ids: list[str]) -> int:
         """Update usage stats. Increments usage_count, auto-pins at 3 uses."""
-        if not entry_ids or not self.jsonl_path.exists():
-            return 0
+        with self._lock:
+            if not entry_ids or not self.jsonl_path.exists():
+                return 0
 
-        now = datetime.now().isoformat()
-        updated_count = 0
-        id_set = set(entry_ids)
+            now = datetime.now().isoformat()
+            updated_count = 0
+            id_set = set(entry_ids)
 
-        entries = self._read_jsonl()
-        for entry in entries:
-            if entry.get("id") in id_set:
-                entry["usage_count"] = entry.get("usage_count", 0) + 1
-                entry["last_used"] = now
-                if entry["usage_count"] >= 3 and not entry.get("pinned"):
-                    entry["pinned"] = True
-                updated_count += 1
+            entries = self._read_jsonl()
+            for entry in entries:
+                if entry.get("id") in id_set:
+                    entry["usage_count"] = entry.get("usage_count", 0) + 1
+                    entry["last_used"] = now
+                    if entry["usage_count"] >= 3 and not entry.get("pinned"):
+                        entry["pinned"] = True
+                    updated_count += 1
 
-        if updated_count > 0:
-            self._write_jsonl(entries)
+            if updated_count > 0:
+                self._write_jsonl(entries)
 
-            # Sync in-memory cache from the JSONL-updated entries
-            entries_by_id = {e["id"]: e for e in entries if e.get("id") in id_set}
-            for i, cached in enumerate(self._entries):
-                eid = cached.get("id")
-                if eid in entries_by_id:
-                    self._entries[i].update(entries_by_id[eid])
+                # Sync in-memory cache from the JSONL-updated entries
+                entries_by_id = {e["id"]: e for e in entries if e.get("id") in id_set}
+                for i, cached in enumerate(self._entries):
+                    eid = cached.get("id")
+                    if eid in entries_by_id:
+                        self._entries[i].update(entries_by_id[eid])
 
-            self._enforce_pin_cap(entries)
+                self._enforce_pin_cap(entries)
 
-        return updated_count
+            return updated_count
 
     def _enforce_pin_cap(self, entries: list[dict[str, Any]]) -> None:
         """Enforce max pinned entries. Unpin lowest-usage when cap exceeded."""
@@ -902,7 +956,10 @@ class KnowledgeDB:
         """
         import math
 
-        if not self._entries:
+        with self._lock:
+            entries = list(self._entries)
+
+        if not entries:
             return []
 
         type_weights = {
@@ -921,7 +978,7 @@ class KnowledgeDB:
         priority_scores = {"critical": 100, "high": 50, "medium": 20, "low": 10}
 
         scored = []
-        for entry in self._entries:
+        for entry in entries:
             entry_type = entry.get("type", "finding")
             weight = type_weights.get(entry_type, 1.0)
             if weight == 0.0:
@@ -1062,4 +1119,5 @@ class KnowledgeDB:
 
     def count(self) -> int:
         """Return number of entries."""
-        return len(self._id_to_row) if self._id_to_row else 0
+        with self._lock:
+            return len(self._id_to_row) if self._id_to_row else 0

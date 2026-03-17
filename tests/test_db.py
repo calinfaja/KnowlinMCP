@@ -12,6 +12,7 @@ Tests the hybrid search system with RRF fusion:
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -352,6 +353,57 @@ class TestBatchAdd:
         db = KnowledgeDB(str(temp_kb_dir.parent))
         ids = db.batch_add([])
         assert ids == []
+
+    def test_concurrent_adds(self, monkeypatch, temp_kb_dir):
+        from knowlin_mcp.db import KnowledgeDB
+
+        dense_model = KeywordDenseModel({"worker": np.array([1.0, 0.0], dtype=np.float32)})
+        monkeypatch.setattr("knowlin_mcp.db.get_dense_model", lambda: dense_model)
+        monkeypatch.setattr("knowlin_mcp.db.get_sparse_model", lambda: None)
+
+        db = KnowledgeDB(str(temp_kb_dir.parent))
+        start_barrier = threading.Barrier(5)
+        errors = []
+
+        def worker(worker_id):
+            try:
+                start_barrier.wait()
+                for entry_idx in range(2):
+                    db.add(
+                        {
+                            "title": f"Worker {worker_id} entry {entry_idx}",
+                            "insight": f"Concurrent add {worker_id}-{entry_idx}",
+                        },
+                        check_duplicates=False,
+                    )
+            except Exception as exc:  # pragma: no cover - assertion covers this path
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(worker_id,)) for worker_id in range(5)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=3.0)
+
+        expected_titles = {
+            f"Worker {worker_id} entry {entry_idx}"
+            for worker_id in range(5)
+            for entry_idx in range(2)
+        }
+
+        assert errors == []
+        assert all(not thread.is_alive() for thread in threads)
+        assert db.count() == 10
+        assert db._embeddings is not None
+        assert db._embeddings.shape[0] == 10
+        assert len(db._id_to_row) == 10
+        assert {entry["title"] for entry in db._entries} == expected_titles
+
+        with open(temp_kb_dir / "entries.jsonl") as f:
+            lines = [json.loads(line) for line in f if line.strip()]
+
+        assert len(lines) == 10
+        assert {entry["title"] for entry in lines} == expected_titles
 
 
 # =============================================================================

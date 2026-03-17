@@ -29,6 +29,22 @@ MIN_CHUNK_CHARS = 50  # Merge tiny chunks with neighbors
 OVERLAP_CHARS = 200  # ~50 tokens overlap for sub-splits
 
 SOURCES_CONFIG_FILE = "sources.yaml"
+VALID_SOURCE_KEYS = {"docs", "sessions", "codex"}
+
+
+def _validate_sources_config(config: dict) -> None:
+    """Validate sources.yaml structure."""
+    if not isinstance(config, dict):
+        raise ValueError("sources.yaml must be a YAML mapping")
+
+    unknown = sorted(set(config.keys()) - VALID_SOURCE_KEYS)
+    if unknown:
+        raise ValueError(f"Unknown keys in sources.yaml: {unknown}")
+
+    for key in config:
+        section = config[key]
+        if not isinstance(section, dict):
+            raise ValueError(f"sources.yaml '{key}' must be a mapping")
 
 
 def load_sources_config(db_path: Path) -> dict | None:
@@ -41,14 +57,21 @@ def load_sources_config(db_path: Path) -> dict | None:
         return None
     try:
         import yaml
-
-        return yaml.safe_load(config_path.read_text()) or {}
     except ImportError:
         debug_log("pyyaml not installed, ignoring sources.yaml")
         return None
-    except Exception as e:
+
+    try:
+        config = yaml.safe_load(config_path.read_text()) or {}
+    except yaml.YAMLError as e:
         debug_log(f"Failed to read {config_path}: {e}")
         return None
+    except OSError as e:
+        debug_log(f"Failed to read {config_path}: {e}")
+        return None
+
+    _validate_sources_config(config)
+    return config
 
 
 def _resolve_paths(paths: list[str], project_root: Path) -> list[Path]:

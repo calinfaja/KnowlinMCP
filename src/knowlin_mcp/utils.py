@@ -6,6 +6,7 @@ TCP communication, schema constants, type inference, and debug logging.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import socket
 import sys
@@ -16,6 +17,7 @@ from knowlin_mcp.platform import (
     KB_DIR_NAME,
     get_kb_pid_file,
     get_kb_port_file,
+    get_kb_token_file,
 )
 
 # =============================================================================
@@ -23,10 +25,25 @@ from knowlin_mcp.platform import (
 # =============================================================================
 
 
+logger = logging.getLogger("knowlin")
+
+
+def setup_logging() -> None:
+    """Configure logging based on KNOWLIN_DEBUG env var."""
+    level = logging.DEBUG if os.environ.get("KNOWLIN_DEBUG") else logging.WARNING
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter("[%(name)s] %(message)s"))
+    logger.setLevel(level)
+    if not logger.handlers:
+        logger.addHandler(handler)
+
+
+setup_logging()
+
+
 def debug_log(msg: str, category: str = "kb") -> None:
-    """Log debug message if KNOWLIN_DEBUG env var is set."""
-    if os.environ.get("KNOWLIN_DEBUG"):
-        print(f"[{category}] {msg}", file=sys.stderr)
+    """Log debug message."""
+    logger.debug("[%s] %s", category, msg)
 
 
 # =============================================================================
@@ -279,6 +296,18 @@ def get_pid_path(project_path: str | Path) -> str:
     return str(get_kb_pid_file(Path(project_path)))
 
 
+def _read_server_token(project_path: str | Path) -> str | None:
+    """Read KB server auth token for a project from its token file."""
+    token_file = get_kb_token_file(Path(project_path))
+    try:
+        if token_file.exists():
+            token = token_file.read_text().strip()
+            return token or None
+    except OSError:
+        pass
+    return None
+
+
 def is_kb_initialized(project_path: str | Path) -> bool:
     """Check if knowledge DB is initialized (has .knowledge-db dir)."""
     if not project_path:
@@ -289,14 +318,16 @@ def is_kb_initialized(project_path: str | Path) -> bool:
 def is_server_running(project_path: str | Path, timeout: float = 0.5) -> bool:
     """Check if KB server is running and responding to ping."""
     port = get_server_port(project_path)
-    if not port:
+    token = _read_server_token(project_path)
+    if not port or not token:
         return False
 
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.settimeout(timeout)
             sock.connect((HOST, port))
-            sock.sendall(b'{"cmd":"ping"}')
+            payload = json.dumps({"cmd": "ping", "token": token}).encode("utf-8")
+            sock.sendall(payload)
             sock.shutdown(socket.SHUT_WR)
             response = sock.recv(1024).decode()
             return '"pong"' in response
@@ -309,6 +340,7 @@ def clean_stale_socket(project_path: str | Path) -> bool:
     project = Path(project_path)
     port_file = get_kb_port_file(project)
     pid_file = get_kb_pid_file(project)
+    token_file = get_kb_token_file(project)
 
     if not port_file.exists():
         return False
@@ -317,6 +349,7 @@ def clean_stale_socket(project_path: str | Path) -> bool:
         try:
             port_file.unlink(missing_ok=True)
             pid_file.unlink(missing_ok=True)
+            token_file.unlink(missing_ok=True)
             debug_log(f"Cleaned stale files for: {project_path}")
             return True
         except Exception as e:
@@ -343,14 +376,17 @@ def recv_all(sock: socket.socket) -> bytes:
 def send_command(project_path: str | Path, cmd_data: dict, timeout: float = 5.0) -> dict | None:
     """Send command to KB server for a project. Returns response dict or None."""
     port = get_server_port(project_path)
-    if not port:
+    token = _read_server_token(project_path)
+    if not port or not token:
         return None
 
     try:
+        payload = dict(cmd_data)
+        payload["token"] = token
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.settimeout(timeout)
             sock.connect((HOST, port))
-            sock.sendall(json.dumps(cmd_data).encode("utf-8"))
+            sock.sendall(json.dumps(payload).encode("utf-8"))
             sock.shutdown(socket.SHUT_WR)
             return json.loads(recv_all(sock).decode("utf-8"))
     except Exception as e:

@@ -119,6 +119,20 @@ class TestDoctor:
         assert "configured doc path missing" in result.output
 
 
+class TestSourcesCommand:
+    """Tests for the sources command."""
+
+    def test_sources_init_template_includes_codex_section(self, runner, tmp_path):
+        (tmp_path / ".knowledge-db").mkdir()
+
+        result = runner.invoke(main, ["sources", "--init", "-p", str(tmp_path)])
+
+        assert result.exit_code == 0
+        contents = (tmp_path / ".knowledge-db" / "sources.yaml").read_text()
+        assert "codex:" in contents
+        assert "~/.codex/sessions/" in contents
+
+
 class TestStatsCommand:
     """Tests for the multi-source stats command."""
 

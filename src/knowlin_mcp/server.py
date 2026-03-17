@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import signal
 import socket
 import sys
@@ -23,12 +24,14 @@ from knowlin_mcp.platform import (
     get_kb_pid_file,
     get_kb_port,
     get_kb_port_file,
+    get_kb_token_file,
     get_project_hash,
     get_runtime_dir,
     is_process_running,
     write_pid_file,
     write_runtime_file,
 )
+from knowlin_mcp.utils import logger
 
 IDLE_TIMEOUT = 3600  # 1 hour
 
@@ -64,6 +67,12 @@ def write_port_file(project_path: Path, port: int) -> None:
     write_runtime_file(port_file, str(port))
 
 
+def write_token_file(project_path: Path, token: str) -> None:
+    """Write auth token to project's token file."""
+    token_file = get_kb_token_file(project_path)
+    write_runtime_file(token_file, token)
+
+
 def list_running_servers() -> list[dict]:
     """List all running knowledge servers."""
     servers = []
@@ -71,6 +80,7 @@ def list_running_servers() -> list[dict]:
 
     for port_file in runtime_dir.glob("kb-*.port"):
         pid_file = port_file.with_suffix(".pid")
+        token_file = port_file.with_suffix(".token")
         if not pid_file.exists():
             continue
 
@@ -81,9 +91,17 @@ def list_running_servers() -> list[dict]:
             if not is_process_running(pid):
                 port_file.unlink(missing_ok=True)
                 pid_file.unlink(missing_ok=True)
+                token_file.unlink(missing_ok=True)
                 continue
 
-            info = send_command_to_port(port, {"cmd": "status"})
+            if not token_file.exists():
+                continue
+
+            token = token_file.read_text().strip()
+            if not token:
+                continue
+
+            info = send_command_to_port(port, {"cmd": "status", "token": token})
             if info and "project" in info:
                 servers.append(
                     {
@@ -114,6 +132,7 @@ class KnowledgeServer:
         self.running = False
         self.load_time = 0.0
         self.last_activity = time.time()
+        self.token = ""
         self._handlers = {
             "search": self._cmd_search,
             "status": self._cmd_status,
@@ -138,9 +157,9 @@ class KnowledgeServer:
         if not has_fastembed and not has_entries:
             db_path.mkdir(parents=True, exist_ok=True)
             (db_path / "entries.jsonl").touch()
-            print(f"Auto-initialized empty Knowledge DB at {db_path}")
+            logger.info("[server] Auto-initialized empty Knowledge DB at %s", db_path)
 
-        print(f"Loading index from {db_path}...")
+        logger.info("[server] Loading index from %s...", db_path)
         start = time.time()
 
         from knowlin_mcp.db import KnowledgeDB
@@ -152,7 +171,7 @@ class KnowledgeServer:
         self.ms = MultiSourceSearch(str(self.project_root))
         self.load_time = time.time() - start
         count = self.db.count()
-        print(f"Index loaded in {self.load_time:.2f}s ({count} entries)")
+        logger.info("[server] Index loaded in %.2fs (%s entries)", self.load_time, count)
         return True
 
     # -------------------------------------------------------------------------
@@ -327,7 +346,8 @@ class KnowledgeServer:
                 counts["docs"] = di.ingest(full=full)
             total = sum(counts.values())
             if total > 0 and self.db:
-                self.db._load_index()
+                with self.db._lock:
+                    self.db._load_index()
             return {"status": "ok", "counts": counts, "total": total}
         except Exception as e:
             return {"error": f"Ingest failed: {e}"}
@@ -337,7 +357,8 @@ class KnowledgeServer:
             return err
         try:
             old_count = self.db.count()
-            self.db._load_index()
+            with self.db._lock:
+                self.db._load_index()
             new_count = self.db.count()
             from knowlin_mcp.multi_search import MultiSourceSearch
 
@@ -371,6 +392,13 @@ class KnowledgeServer:
                 return
 
             request = json.loads(data)
+            if request.get("token") != self.token:
+                conn.sendall(
+                    json.dumps({"status": "error", "error": "authentication required"}).encode(
+                        "utf-8"
+                    )
+                )
+                return
             cmd = request.get("cmd", "search")
 
             # Only update idle timer for meaningful commands (not ping/status)
@@ -397,14 +425,14 @@ class KnowledgeServer:
         """Check if server should shut down due to inactivity."""
         idle_time = time.time() - self.last_activity
         if idle_time > IDLE_TIMEOUT:
-            print(f"\nIdle timeout ({IDLE_TIMEOUT}s) reached. Shutting down...")
+            logger.warning("[server] Idle timeout (%ss) reached. Shutting down...", IDLE_TIMEOUT)
             return True
         return False
 
     def start(self) -> None:
         """Start the TCP server."""
         if not self.load_index():
-            print("ERROR: No index found in .knowledge-db/")
+            logger.warning("[server] No index found in %s", self.project_root / ".knowledge-db")
             sys.exit(1)
 
         base_port = get_kb_port()
@@ -419,41 +447,48 @@ class KnowledgeServer:
 
         pid_file = get_kb_pid_file(self.project_root)
         port_file = get_kb_port_file(self.project_root)
-        write_pid_file(pid_file, os.getpid())
-        write_port_file(self.project_root, self.port)
-
-        print("Knowledge server started")
-        print(f"  Port:    {HOST}:{self.port}")
-        print(f"  Project: {self.project_root}")
-        print(f"  Timeout: {IDLE_TIMEOUT}s idle")
-        print("Ready for queries (Ctrl+C to stop)")
-
-        self.running = True
+        token_file = get_kb_token_file(self.project_root)
+        self.token = secrets.token_hex(16)
 
         def signal_handler(sig, frame):
-            print("\nShutting down...")
+            logger.info("[server] Shutting down...")
             self.running = False
 
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
-        while self.running:
-            try:
-                server.settimeout(60.0)
-                conn, _ = server.accept()
-                threading.Thread(target=self.handle_client, args=(conn,), daemon=True).start()
-            except socket.timeout:
-                if self.check_idle_timeout():
-                    break
-                continue
-            except Exception as e:
-                if self.running:
-                    print(f"Error: {e}")
+        try:
+            write_pid_file(pid_file, os.getpid())
+            write_port_file(self.project_root, self.port)
+            write_token_file(self.project_root, self.token)
 
-        server.close()
-        pid_file.unlink(missing_ok=True)
-        port_file.unlink(missing_ok=True)
-        print("Server stopped")
+            logger.info("[server] Knowledge server started")
+            logger.info("[server] Port: %s:%s", HOST, self.port)
+            logger.info("[server] Project: %s", self.project_root)
+            logger.info("[server] Timeout: %ss idle", IDLE_TIMEOUT)
+            logger.info("[server] Ready for queries (Ctrl+C to stop)")
+
+            self.running = True
+
+            while self.running:
+                try:
+                    server.settimeout(60.0)
+                    conn, _ = server.accept()
+                    threading.Thread(target=self.handle_client, args=(conn,), daemon=True).start()
+                except socket.timeout:
+                    if self.check_idle_timeout():
+                        break
+                    continue
+                except Exception as e:
+                    if self.running:
+                        logger.warning("[server] Error: %s", e)
+        finally:
+            self.running = False
+            server.close()
+            pid_file.unlink(missing_ok=True)
+            port_file.unlink(missing_ok=True)
+            token_file.unlink(missing_ok=True)
+            logger.info("[server] Server stopped")
 
 
 def send_command_to_port(port: int, cmd_data: dict, timeout: float = 5.0) -> dict | None:
@@ -473,7 +508,6 @@ def send_command_to_port(port: int, cmd_data: dict, timeout: float = 5.0) -> dic
 
 def send_command(project_path: Path, cmd_data: dict) -> dict | None:
     """Send command to the server for a project."""
-    port = read_port_file(project_path)
-    if not port:
-        return None
-    return send_command_to_port(port, cmd_data)
+    from knowlin_mcp.utils import send_command as send_project_command
+
+    return send_project_command(project_path, cmd_data)

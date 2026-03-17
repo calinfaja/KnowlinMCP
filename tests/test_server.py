@@ -10,6 +10,7 @@ Tests verify:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import socket
 import threading
@@ -18,6 +19,28 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+def _send_server_request(server, request):
+    client, server_conn = socket.socketpair()
+    thread = threading.Thread(target=server.handle_client, args=(server_conn,))
+    thread.start()
+    try:
+        client.sendall(json.dumps(request).encode("utf-8"))
+        client.shutdown(socket.SHUT_WR)
+
+        chunks = []
+        while True:
+            chunk = client.recv(1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+    finally:
+        client.close()
+        thread.join(timeout=3.0)
+
+    return json.loads(b"".join(chunks).decode("utf-8"))
+
 
 # =============================================================================
 # Port File Tests
@@ -46,6 +69,16 @@ class TestPortFileManagement:
         result = get_kb_port_file(project)
         project_hash = get_project_hash(project)
         assert project_hash in result.stem
+
+    def test_get_kb_token_file_returns_path(self, tmp_path):
+        from knowlin_mcp.platform import get_kb_token_file
+
+        project = tmp_path / "test-project"
+        project.mkdir()
+
+        result = get_kb_token_file(project)
+        assert isinstance(result, Path)
+        assert result.suffix == ".token"
 
 
 class TestGetServerPort:
@@ -217,6 +250,73 @@ class TestKnowledgeServerSearch:
         assert response["results"] == [{"id": "doc-1", "_source": "docs"}]
 
 
+class TestKnowledgeServerAuthentication:
+    """Tests for per-request TCP authentication."""
+
+    def test_handle_client_rejects_missing_token(self, tmp_path):
+        from knowlin_mcp.server import KnowledgeServer
+
+        (tmp_path / ".knowledge-db").mkdir()
+
+        server = KnowledgeServer(str(tmp_path))
+        server.token = "secret-token"
+
+        response = _send_server_request(server, {"cmd": "ping"})
+
+        assert response == {"status": "error", "error": "authentication required"}
+
+    def test_send_command_includes_token(self, tmp_path):
+        from knowlin_mcp.utils import send_command
+
+        project = tmp_path / "project"
+        project.mkdir()
+        token_file = tmp_path / "test.token"
+        token_file.write_text("secret-token")
+        received = []
+
+        server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server_sock.bind(("127.0.0.1", 0))
+        server_sock.listen(1)
+        port = server_sock.getsockname()[1]
+
+        def auth_server():
+            conn, _ = server_sock.accept()
+            chunks = []
+            while True:
+                chunk = conn.recv(1024)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            request = json.loads(b"".join(chunks).decode("utf-8"))
+            received.append(request)
+            if request.get("token") == "secret-token":
+                conn.sendall(json.dumps({"pong": True}).encode("utf-8"))
+            else:
+                conn.sendall(
+                    json.dumps({"status": "error", "error": "authentication required"}).encode(
+                        "utf-8"
+                    )
+                )
+            conn.close()
+            server_sock.close()
+
+        thread = threading.Thread(target=auth_server)
+        thread.start()
+
+        try:
+            with (
+                patch("knowlin_mcp.utils.get_server_port", return_value=port),
+                patch("knowlin_mcp.utils.get_kb_token_file", return_value=token_file),
+            ):
+                response = send_command(project, {"cmd": "ping"})
+        finally:
+            thread.join(timeout=3.0)
+
+        assert response == {"pong": True}
+        assert received == [{"cmd": "ping", "token": "secret-token"}]
+
+
 # =============================================================================
 # KB Initialization Tests
 # =============================================================================
@@ -268,18 +368,22 @@ class TestCleanStaleSocket:
 
         port_file = tmp_path / "test.port"
         pid_file = tmp_path / "test.pid"
+        token_file = tmp_path / "test.token"
         port_file.write_text("59999")
         pid_file.write_text("999999")
+        token_file.write_text("secret-token")
 
         with (
             patch("knowlin_mcp.utils.get_kb_port_file", return_value=port_file),
             patch("knowlin_mcp.utils.get_kb_pid_file", return_value=pid_file),
+            patch("knowlin_mcp.utils.get_kb_token_file", return_value=token_file),
             patch("knowlin_mcp.utils.is_server_running", return_value=False),
         ):
             result = clean_stale_socket(project)
             assert result is True
             assert not port_file.exists()
             assert not pid_file.exists()
+            assert not token_file.exists()
 
 
 # =============================================================================
@@ -336,3 +440,34 @@ class TestRuntimeDirSecurity:
 
         with pytest.raises(PermissionError):
             platform.get_runtime_dir()
+
+
+class TestStructuredLogging:
+    """Tests for logging configuration and levels."""
+
+    def test_debug_log_emits_debug_record(self, caplog):
+        from knowlin_mcp.utils import debug_log
+
+        with caplog.at_level(logging.DEBUG, logger="knowlin"):
+            debug_log("auth ok", category="server")
+
+        assert any(
+            record.levelno == logging.DEBUG and record.message == "[server] auth ok"
+            for record in caplog.records
+        )
+
+    def test_check_idle_timeout_logs_warning(self, tmp_path, caplog):
+        from knowlin_mcp.server import IDLE_TIMEOUT, KnowledgeServer
+
+        (tmp_path / ".knowledge-db").mkdir()
+
+        server = KnowledgeServer(str(tmp_path))
+        server.last_activity = time.time() - IDLE_TIMEOUT - 1
+
+        with caplog.at_level(logging.WARNING, logger="knowlin"):
+            assert server.check_idle_timeout() is True
+
+        assert any(
+            record.levelno == logging.WARNING and "Idle timeout" in record.message
+            for record in caplog.records
+        )

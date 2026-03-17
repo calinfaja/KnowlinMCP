@@ -648,6 +648,18 @@ class TestSourcesConfig:
         # Should not crash -- returns None on error
         assert result is None
 
+    def test_load_rejects_unknown_keys(self, tmp_path):
+        (tmp_path / "sources.yaml").write_text("unknown:\n  enabled: true\n")
+
+        with pytest.raises(ValueError, match="Unknown keys in sources.yaml"):
+            load_sources_config(tmp_path)
+
+    def test_load_rejects_non_mapping_section(self, tmp_path):
+        (tmp_path / "sources.yaml").write_text("docs:\n  - docs/\n")
+
+        with pytest.raises(ValueError, match="sources.yaml 'docs' must be a mapping"):
+            load_sources_config(tmp_path)
+
     def test_resolve_relative_paths(self, tmp_path):
         paths = _resolve_paths(["docs/", "src/notes/"], tmp_path)
         assert paths[0] == (tmp_path / "docs").resolve()
