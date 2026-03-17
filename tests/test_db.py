@@ -125,6 +125,25 @@ class TestSparseIndexPersistence:
 
         np.testing.assert_array_equal(db._embeddings, embeddings)
 
+    def test_auto_rebuilds_after_corrupt_embeddings(self, monkeypatch, temp_kb_dir):
+        from knowlin_mcp.db import KnowledgeDB
+
+        dense_model = KeywordDenseModel({"alpha": np.array([1.0, 0.0], dtype=np.float32)})
+        monkeypatch.setattr("knowlin_mcp.db.get_dense_model", lambda: dense_model)
+        monkeypatch.setattr("knowlin_mcp.db.get_sparse_model", lambda: None)
+
+        entry = {"id": "entry-1", "title": "Alpha entry", "insight": "Alpha details"}
+        (temp_kb_dir / "entries.jsonl").write_text(json.dumps(entry) + "\n")
+        (temp_kb_dir / "embeddings.npy").write_text("corrupt")
+        (temp_kb_dir / "index.json").write_text(json.dumps({"entry-1": 0}))
+
+        db = KnowledgeDB(str(temp_kb_dir.parent))
+        results = db.search("alpha", limit=1, rerank=False)
+
+        assert db.count() == 1
+        assert len(results) == 1
+        assert results[0]["id"] == "entry-1"
+
 
 # =============================================================================
 # TestHybridSearch

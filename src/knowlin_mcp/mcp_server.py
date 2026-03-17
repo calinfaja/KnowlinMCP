@@ -2,36 +2,63 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp.exceptions import ToolError
-from mcp.types import ToolAnnotations
+try:
+    from mcp.server.fastmcp import FastMCP
+    from mcp.server.fastmcp.exceptions import ToolError
+    from mcp.types import ToolAnnotations
+
+    _HAS_MCP = True
+except ImportError:
+    FastMCP = None  # type: ignore[assignment,misc]
+
+    class ToolError(RuntimeError):
+        """Fallback ToolError when MCP is not installed."""
+
+    ToolAnnotations = None  # type: ignore[assignment,misc]
+    _HAS_MCP = False
 
 from knowlin_mcp.platform import find_project_root
 from knowlin_mcp.utils import logger
 
-mcp = FastMCP(
-    "knowlin-mcp",
-    instructions=(
-        "Per-project knowledge database with hybrid semantic search. "
-        "Results are scoped to the current project's .knowledge-db/ directory.\n\n"
-        "WHEN TO USE:\n"
-        "- Before answering questions about the codebase or past decisions: "
-        "call knowlin_search for relevant prior context\n"
-        "- When you discover useful insights, solutions, or patterns: "
-        "call knowlin_capture to persist them for future retrieval\n\n"
-        "TIPS: Use specific queries over broad ones. Filter by source "
-        "(kb, sessions, docs) when you know where the answer likely lives."
-    ),
-)
-
 _project_root: str | None = None
 
-_READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
-_WRITE = ToolAnnotations(
-    readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
-)
+if _HAS_MCP:
+    mcp = FastMCP(
+        "knowlin-mcp",
+        instructions=(
+            "Per-project knowledge database with hybrid semantic search. "
+            "Results are scoped to the current project's .knowledge-db/ directory.\n\n"
+            "WHEN TO USE:\n"
+            "- Before answering questions about the codebase or past decisions: "
+            "call knowlin_search for relevant prior context\n"
+            "- When you discover useful insights, solutions, or patterns: "
+            "call knowlin_capture to persist them for future retrieval\n\n"
+            "TIPS: Use specific queries over broad ones. Filter by source "
+            "(kb, sessions, docs) when you know where the answer likely lives."
+        ),
+    )
+    _READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
+    _WRITE = ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
+    )
+else:
+    mcp = None
+    _READ_ONLY = None
+    _WRITE = None
+
+
+def _tool(*args, **kwargs):
+    """Register an MCP tool when MCP support is available."""
+
+    def decorator(func):
+        if _HAS_MCP:
+            return mcp.tool(*args, **kwargs)(func)
+        return func
+
+    return decorator
 
 
 def _get_project_root() -> str:
@@ -55,7 +82,7 @@ def _parse_sources(sources: str) -> list[str]:
     return [s.strip().lower() for s in sources.split(",") if s.strip()]
 
 
-@mcp.tool(title="Search Knowledge Base", annotations=_READ_ONLY)
+@_tool(title="Search Knowledge Base", annotations=_READ_ONLY)
 def knowlin_search(
     query: str,
     limit: int = 5,
@@ -127,7 +154,7 @@ def knowlin_search(
         raise ToolError("Operation failed")
 
 
-@mcp.tool(title="Get Knowledge Entry", annotations=_READ_ONLY)
+@_tool(title="Get Knowledge Entry", annotations=_READ_ONLY)
 def knowlin_get(entry_id: str) -> str:
     """Retrieve the full details of a knowledge entry by its ID.
 
@@ -192,7 +219,7 @@ def _format_full_entry(entry: dict, source: str) -> str:
     return "\n".join(lines)
 
 
-@mcp.tool(title="Knowledge DB Statistics", annotations=_READ_ONLY)
+@_tool(title="Knowledge DB Statistics", annotations=_READ_ONLY)
 def knowlin_stats() -> str:
     """Show knowledge database statistics (entry counts, sizes, health)."""
     try:
@@ -226,7 +253,7 @@ def knowlin_stats() -> str:
         raise ToolError("Operation failed")
 
 
-@mcp.tool(title="Ingest Documents & Sessions", annotations=_WRITE)
+@_tool(title="Ingest Documents & Sessions", annotations=_WRITE)
 def knowlin_ingest(source: str = "all") -> str:
     """Ingest documents and/or session transcripts into the knowledge database.
 
@@ -266,7 +293,7 @@ def knowlin_ingest(source: str = "all") -> str:
         raise ToolError("Operation failed")
 
 
-@mcp.tool(title="Capture Knowledge Entry", annotations=_WRITE)
+@_tool(title="Capture Knowledge Entry", annotations=_WRITE)
 def knowlin_capture(
     title: str,
     insight: str,
@@ -325,6 +352,12 @@ def knowlin_capture(
 
 def main():
     """Entry point for knowlin-mcp command."""
+    if not _HAS_MCP:
+        print(
+            "Error: MCP support not installed. Run: pip install 'knowlin-mcp[mcp]'",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     mcp.run(transport="stdio")
 
 

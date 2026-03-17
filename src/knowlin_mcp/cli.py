@@ -25,7 +25,7 @@ from knowlin_mcp.platform import (
     read_pid_file,
 )
 from knowlin_mcp.search import FORMATTERS, format_single_entry
-from knowlin_mcp.utils import debug_log, is_server_running
+from knowlin_mcp.utils import debug_log, is_server_running, logger
 
 console = Console()
 
@@ -435,11 +435,12 @@ def export(source, fmt, output, project):
 
     entries = []
     for sub in sub_stores:
+        sub_name = sub or "kb"
         try:
             db = KnowledgeDB(str(root), sub_store=sub)
             entries.extend(db._read_jsonl(migrate=True))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Error accessing %s store: %s", sub_name, e)
 
     if fmt == "json":
         text = json.dumps(entries, indent=2)
@@ -480,8 +481,8 @@ def list_entries(limit, source, project):
             for e in db.list_recent(limit=limit):
                 e["_source"] = label
                 entries.append(e)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Error accessing %s store: %s", label, e)
 
     # Sort by date descending, take top N
     entries.sort(
@@ -518,11 +519,12 @@ def get(entry_id, project):
     root = _resolve_project(project)
 
     for sub in (None, "sessions", "docs"):
+        sub_name = sub or "kb"
         try:
             db = KnowledgeDB(str(root), sub_store=sub)
             entry = db.get(entry_id)
             if entry:
-                source = sub or "kb"
+                source = sub_name
                 console.print(f"\n[bold]{entry.get('title', 'Untitled')}[/bold]")
                 console.print(
                     f"[dim]{source} | {entry.get('type', '')} | "
@@ -536,8 +538,8 @@ def get(entry_id, project):
                 if kw:
                     console.print(f"\n[dim]Keywords: {', '.join(kw)}[/dim]")
                 return
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Error accessing %s store: %s", sub_name, e)
 
     console.print(f"[red]Entry not found: {entry_id}[/red]")
     raise SystemExit(1)
@@ -562,18 +564,18 @@ def delete(entry_id, source, project):
     stores = [None if source == "kb" else source] if source else [None, "sessions", "docs"]
 
     for sub in stores:
+        sub_name = sub or "kb"
         try:
             db = KnowledgeDB(str(root), sub_store=sub)
             entry = db.get(entry_id)
             if entry:
-                label = sub or "kb"
                 title = entry.get("title", "Untitled")
                 removed = db.remove_entries([entry_id])
                 if removed:
-                    console.print(f"Deleted from {label}: {title}")
+                    console.print(f"Deleted from {sub_name}: {title}")
                     return
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Error accessing %s store: %s", sub_name, e)
 
     console.print(f"[red]Entry not found: {entry_id}[/red]")
     raise SystemExit(1)
@@ -653,6 +655,7 @@ def doctor(fix, project):
         jsonl = store_path / "entries.jsonl"
         emb = store_path / "embeddings.npy"
         idx = store_path / "index.json"
+        sparse_path = store_path / "sparse_index.json"
 
         if not jsonl.exists():
             if sub_store:
@@ -667,6 +670,17 @@ def doctor(fix, project):
             for line in f:
                 if line.strip():
                     jsonl_count += 1
+
+        if sparse_path.exists():
+            try:
+                sparse_data = json.loads(sparse_path.read_text())
+                if not isinstance(sparse_data, dict):
+                    warn(f"{store_name}: sparse_index.json is not a dict")
+            except (json.JSONDecodeError, OSError) as e:
+                warn(f"{store_name}: corrupt sparse_index.json: {e}")
+                if fix:
+                    sparse_path.unlink()
+                    ok(f"{store_name}: removed corrupt sparse_index.json (will be rebuilt)")
 
         if not emb.exists():
             warn(f"{store_name}: entries.jsonl ({jsonl_count}) but no embeddings.npy")
@@ -727,6 +741,7 @@ def doctor(fix, project):
     # 3. Check registries
     for name, reg_path in [
         ("session-registry", db_path / "session-registry.json"),
+        ("codex-registry", db_path / "codex-registry.json"),
         ("doc-registry", db_path / "doc-registry.json"),
     ]:
         if reg_path.exists():

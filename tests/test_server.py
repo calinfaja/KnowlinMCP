@@ -221,6 +221,42 @@ class TestKnowledgeServerAdd:
         assert "rejected" in response["error"].lower()
 
 
+class TestKnowledgeServerIngest:
+    """Tests for KnowledgeServer._cmd_ingest()."""
+
+    @patch("knowlin_mcp.multi_search.MultiSourceSearch")
+    @patch("knowlin_mcp.ingest_codex.CodexIngester")
+    def test_cmd_ingest_accepts_codex_and_refreshes_multi_search(
+        self,
+        mock_codex_cls,
+        mock_ms_cls,
+        tmp_path,
+    ):
+        from knowlin_mcp.server import KnowledgeServer
+
+        (tmp_path / ".knowledge-db").mkdir()
+
+        server = KnowledgeServer(str(tmp_path))
+        server.db = MagicMock()
+        server.db._lock = threading.RLock()
+        previous_ms = object()
+        refreshed_ms = MagicMock()
+        server.ms = previous_ms
+
+        mock_codex_cls.return_value.ingest.return_value = 2
+        mock_ms_cls.return_value = refreshed_ms
+
+        response = server._cmd_ingest({"source": "codex", "full": True})
+
+        assert response == {"status": "ok", "counts": {"codex": 2}, "total": 2}
+        mock_codex_cls.assert_called_once_with(str(tmp_path))
+        mock_codex_cls.return_value.ingest.assert_called_once_with(full=True)
+        server.db._load_index.assert_called_once_with()
+        mock_ms_cls.assert_called_once_with(str(tmp_path))
+        assert server.ms is refreshed_ms
+        assert server.ms is not previous_ms
+
+
 class TestKnowledgeServerSearch:
     """Tests for KnowledgeServer._cmd_search()."""
 

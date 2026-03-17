@@ -103,6 +103,15 @@ class TestDoctor:
         result = runner.invoke(main, ["doctor", "-p", str(healthy_project)])
         assert "corrupted" in result.output
 
+    def test_doctor_detects_corrupt_sparse_index(self, runner, healthy_project):
+        db_path = healthy_project / ".knowledge-db"
+        (db_path / "sparse_index.json").write_text("{not-json")
+
+        result = runner.invoke(main, ["doctor", "-p", str(healthy_project)])
+
+        assert result.exit_code == 1
+        assert "corrupt sparse_index.json" in result.output
+
     def test_doctor_checks_sources_yaml(self, runner, healthy_project):
         db_path = healthy_project / ".knowledge-db"
         # Write valid YAML

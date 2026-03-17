@@ -33,7 +33,7 @@ from knowlin_mcp.models import (
     get_sparse_model,
 )
 from knowlin_mcp.platform import find_project_root
-from knowlin_mcp.utils import debug_log, migrate_entry
+from knowlin_mcp.utils import debug_log, logger, migrate_entry
 
 # Re-export for backward compat (fastembed TextEmbedding used in type hints)
 try:
@@ -145,19 +145,49 @@ class KnowledgeDB:
         has_entries = self.jsonl_path.exists()
         return has_old and not has_new and has_entries
 
+    def _clear_loaded_state(self) -> None:
+        """Reset in-memory index state."""
+        self._embeddings = None
+        self._id_to_row = {}
+        self._row_to_id = {}
+        self._entries = []
+        self._sparse_vectors = {}
+        self._inverted_index = {}
+
+    def _maybe_rebuild_from_jsonl(self) -> bool:
+        """Rebuild the index from JSONL when source data exists."""
+        try:
+            entries = self._read_jsonl(migrate=True)
+        except Exception as e:
+            debug_log(f"Failed to read entries.jsonl for auto-rebuild: {e}")
+            self._clear_loaded_state()
+            return False
+
+        if not entries:
+            self._clear_loaded_state()
+            return False
+
+        logger.info("Auto-rebuilding index from entries.jsonl (%d entries)", len(entries))
+        try:
+            self.rebuild_index()
+            return True
+        except Exception as e:
+            debug_log(f"Auto-rebuild failed: {e}")
+            self._clear_loaded_state()
+            return False
+
     def _load_index(self) -> None:
         """Load embeddings, sparse vectors, index, and entries from disk."""
+        if not self.embeddings_path.exists() or not self.index_path.exists():
+            self._maybe_rebuild_from_jsonl()
+            return
+
         if self.embeddings_path.exists() and self.index_path.exists():
             try:
                 file_size = self.embeddings_path.stat().st_size
                 if file_size > MAX_EMBEDDINGS_FILE_SIZE:
                     debug_log(f"embeddings.npy too large ({file_size} bytes), skipping load")
-                    self._embeddings = None
-                    self._id_to_row = {}
-                    self._row_to_id = {}
-                    self._entries = []
-                    self._sparse_vectors = {}
-                    self._inverted_index = {}
+                    self._clear_loaded_state()
                     return
                 self._embeddings = np.load(str(self.embeddings_path))
                 with open(self.index_path) as f:
@@ -217,13 +247,8 @@ class KnowledgeDB:
 
                 self._rebuild_inverted_index()
             except Exception as e:
-                debug_log(f"Failed to load index: {e}")
-                self._embeddings = None
-                self._id_to_row = {}
-                self._row_to_id = {}
-                self._entries = []
-                self._sparse_vectors = {}
-                self._inverted_index = {}
+                debug_log(f"Index load failed: {e}, attempting auto-rebuild")
+                self._maybe_rebuild_from_jsonl()
 
     def _atomic_write_file(self, path: Path, write_fn: Callable[[Path], None]) -> None:
         """Write a file atomically via a same-directory temp file."""
@@ -291,8 +316,10 @@ class KnowledgeDB:
 
     def _append_jsonl(self, entry: dict[str, Any]) -> None:
         """Append a single entry to JSONL."""
-        with open(self.jsonl_path, "a") as f:
+        with open(self.jsonl_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
 
     def _build_searchable_text(self, entry: dict[str, Any]) -> str:
         """Build searchable text from entry fields (V3 + legacy)."""
@@ -606,9 +633,11 @@ class KnowledgeDB:
                     debug_log(f"Batch sparse embedding failed: {e}")
 
             # Write JSONL first (source of truth), then save index
-            with open(self.jsonl_path, "a") as f:
+            with open(self.jsonl_path, "a", encoding="utf-8") as f:
                 for entry in valid_entries:
                     f.write(json.dumps(entry) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
 
             self._save_index()
 

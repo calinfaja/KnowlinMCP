@@ -344,10 +344,18 @@ class KnowledgeServer:
 
                 di = DocsIngester(str(self.project_root))
                 counts["docs"] = di.ingest(full=full)
+            if source in ("codex", "all"):
+                from knowlin_mcp.ingest_codex import CodexIngester
+
+                ingester = CodexIngester(str(self.project_root))
+                counts["codex"] = ingester.ingest(full=full)
             total = sum(counts.values())
-            if total > 0 and self.db:
+            if self.db:
                 with self.db._lock:
                     self.db._load_index()
+            from knowlin_mcp.multi_search import MultiSourceSearch
+
+            self.ms = MultiSourceSearch(str(self.project_root))
             return {"status": "ok", "counts": counts, "total": total}
         except Exception as e:
             return {"error": f"Ingest failed: {e}"}

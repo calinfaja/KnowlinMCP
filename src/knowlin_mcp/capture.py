@@ -7,6 +7,7 @@ fallback chain: server -> direct DB -> JSONL-only.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -161,8 +162,10 @@ def save_entry(entry: dict, knowledge_dir: Path) -> bool:
     # Method 3: JSONL-only fallback
     try:
         entries_file = knowledge_dir / "entries.jsonl"
-        with open(entries_file, "a") as f:
+        with open(entries_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
         debug_log("Entry appended to JSONL")
         _notify_server_reload(project_path)
         return True
