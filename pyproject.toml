@@ -4,12 +4,26 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "knowlin-mcp"
-version = "0.1.0"
+dynamic = ["version"]
 description = "KnowlinMCP -- hybrid semantic knowledge database with MCP server and multi-source search"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
 authors = [{ name = "Calin Faja" }]
+keywords = ["knowledge", "mcp", "semantic-search", "embeddings", "rag"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
 
 dependencies = [
     "fastembed>=0.4.0",
@@ -42,6 +56,9 @@ Issues = "https://github.com/calinfaja/KnowlinMCP/issues"
 [project.scripts]
 knowlin = "knowlin_mcp.cli:main"
 knowlin-mcp = "knowlin_mcp.mcp_server:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "knowlin_mcp.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
