@@ -297,10 +297,12 @@ class TestKnowlinIngest:
     @patch("knowlin_mcp.mcp_server._get_project_root")
     @patch("knowlin_mcp.ingest_docs.DocsIngester")
     @patch("knowlin_mcp.ingest_sessions.SessionIngester")
-    def test_ingest_all(self, mock_si_cls, mock_di_cls, mock_root):
+    @patch("knowlin_mcp.ingest_codex.CodexIngester")
+    def test_ingest_all(self, mock_ci_cls, mock_si_cls, mock_di_cls, mock_root):
         mock_root.return_value = "/fake/project"
         mock_di_cls.return_value.ingest.return_value = 5
         mock_si_cls.return_value.ingest.return_value = 3
+        mock_ci_cls.return_value.ingest.return_value = 1
 
         result = knowlin_ingest("all")
 
