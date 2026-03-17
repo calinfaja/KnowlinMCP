@@ -23,7 +23,7 @@ dependencies = [
 
 [project.optional-dependencies]
 pdf = ["pymupdf4llm>=0.0.10"]
-mcp = ["mcp>=1.9.0"]
+mcp = ["mcp>=1.9.4"]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",

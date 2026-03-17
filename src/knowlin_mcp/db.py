@@ -41,6 +41,8 @@ try:
 except ImportError:
     raise ImportError("fastembed not installed. Run: pip install fastembed")
 
+MAX_EMBEDDINGS_FILE_SIZE = 500 * 1024 * 1024  # 500 MB
+
 
 class KnowledgeDB:
     """Hybrid knowledge database using fastembed (dense + sparse + reranking).
@@ -81,8 +83,8 @@ class KnowledgeDB:
 
         if sub_store:
             store_path = (self.db_path / sub_store).resolve()
-            if not str(store_path).startswith(str(self.db_path.resolve())):
-                raise ValueError(f"sub_store '{sub_store}' escapes db_path")
+            if not store_path.is_relative_to(self.db_path.resolve()):
+                raise ValueError(f"Sub-store path escapes knowledge DB: {store_path}")
             store_path.mkdir(parents=True, exist_ok=True)
             self.embeddings_path = store_path / "embeddings.npy"
             self.sparse_index_path = store_path / "sparse_index.json"
@@ -147,6 +149,16 @@ class KnowledgeDB:
         """Load embeddings, sparse vectors, index, and entries from disk."""
         if self.embeddings_path.exists() and self.index_path.exists():
             try:
+                file_size = self.embeddings_path.stat().st_size
+                if file_size > MAX_EMBEDDINGS_FILE_SIZE:
+                    debug_log(f"embeddings.npy too large ({file_size} bytes), skipping load")
+                    self._embeddings = None
+                    self._id_to_row = {}
+                    self._row_to_id = {}
+                    self._entries = []
+                    self._sparse_vectors = {}
+                    self._inverted_index = {}
+                    return
                 self._embeddings = np.load(str(self.embeddings_path))
                 with open(self.index_path) as f:
                     self._id_to_row = json.load(f)

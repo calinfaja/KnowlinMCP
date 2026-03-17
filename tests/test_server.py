@@ -249,6 +249,56 @@ class TestKnowledgeServerSearch:
         assert response["multi_source"] is True
         assert response["results"] == [{"id": "doc-1", "_source": "docs"}]
 
+    def test_cmd_search_clamps_limit(self, tmp_path):
+        from knowlin_mcp.server import KnowledgeServer
+
+        (tmp_path / ".knowledge-db").mkdir()
+
+        server = KnowledgeServer(str(tmp_path))
+        server.db = MagicMock()
+        server.db.search.return_value = []
+
+        server._cmd_search({"query": "auth", "limit": 99999})
+
+        server.db.search.assert_called_once_with(
+            "auth",
+            50,
+            date_from=None,
+            date_to=None,
+            entry_type=None,
+            branch=None,
+        )
+
+
+class TestKnowledgeServerLimits:
+    """Tests for TCP command limit clamping."""
+
+    def test_cmd_recent_clamps_limit(self, tmp_path):
+        from knowlin_mcp.server import KnowledgeServer
+
+        (tmp_path / ".knowledge-db").mkdir()
+
+        server = KnowledgeServer(str(tmp_path))
+        server.db = MagicMock()
+        server.db.get_recent_important.return_value = []
+
+        server._cmd_recent({"limit": 99999})
+
+        server.db.get_recent_important.assert_called_once_with(50)
+
+    def test_cmd_search_by_date_clamps_limit(self, tmp_path):
+        from knowlin_mcp.server import KnowledgeServer
+
+        (tmp_path / ".knowledge-db").mkdir()
+
+        server = KnowledgeServer(str(tmp_path))
+        server.db = MagicMock()
+        server.db.search_by_date.return_value = []
+
+        server._cmd_search_by_date({"start": "2026-01-01", "limit": 99999})
+
+        server.db.search_by_date.assert_called_once_with("2026-01-01", None, 50)
+
 
 class TestKnowledgeServerAuthentication:
     """Tests for per-request TCP authentication."""
@@ -264,6 +314,25 @@ class TestKnowledgeServerAuthentication:
         response = _send_server_request(server, {"cmd": "ping"})
 
         assert response == {"status": "error", "error": "authentication required"}
+
+    def test_handle_client_sanitizes_internal_errors(self, tmp_path):
+        from knowlin_mcp.server import KnowledgeServer
+
+        (tmp_path / ".knowledge-db").mkdir()
+
+        server = KnowledgeServer(str(tmp_path))
+        server.token = "secret-token"
+        sensitive_path = tmp_path / "private" / "secret.txt"
+
+        def explode(request):
+            raise RuntimeError(f"failed while reading {sensitive_path}")
+
+        server._handlers["explode"] = explode
+
+        response = _send_server_request(server, {"cmd": "explode", "token": "secret-token"})
+
+        assert response == {"status": "error", "error": "internal server error"}
+        assert str(sensitive_path) not in json.dumps(response)
 
     def test_send_command_includes_token(self, tmp_path):
         from knowlin_mcp.utils import send_command

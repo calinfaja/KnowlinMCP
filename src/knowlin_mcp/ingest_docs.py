@@ -341,8 +341,16 @@ class DocsIngester:
         for docs_dir in self.docs_dirs:
             if not docs_dir.exists():
                 continue
+            resolved_root = docs_dir.resolve()
             for path in sorted(docs_dir.rglob("*")):
+                if path.is_symlink():
+                    continue
                 if not path.is_file():
+                    continue
+                try:
+                    if not path.resolve().is_relative_to(resolved_root):
+                        continue
+                except ValueError:
                     continue
                 rel = str(path.relative_to(docs_dir))
 

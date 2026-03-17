@@ -646,6 +646,8 @@ def doctor(fix, project):
     # 2. Check each store
     import numpy as np
 
+    from knowlin_mcp.db import MAX_EMBEDDINGS_FILE_SIZE
+
     for store_name, sub_store in [("kb", None), ("sessions", "sessions"), ("docs", "docs")]:
         store_path = db_path / sub_store if sub_store else db_path
         jsonl = store_path / "entries.jsonl"
@@ -678,6 +680,10 @@ def doctor(fix, project):
             continue
 
         # Check embedding/JSONL alignment
+        emb_size = emb.stat().st_size
+        if emb_size > MAX_EMBEDDINGS_FILE_SIZE:
+            err(f"{store_name}: embeddings.npy too large ({emb_size} bytes), skipping load")
+            continue
         embeddings = np.load(str(emb))
         emb_count = len(embeddings)
 

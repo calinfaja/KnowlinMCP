@@ -16,6 +16,7 @@ import threading
 from datetime import datetime, timedelta
 
 import numpy as np
+import pytest
 
 
 class KeywordDenseModel:
@@ -109,6 +110,20 @@ class TestSparseIndexPersistence:
         assert len(db._sparse_vectors) == 2
         assert 0 in db._sparse_vectors
         assert db._sparse_vectors[0]["token1"] == 0.5
+
+    def test_loads_embeddings_when_size_within_limit(self, temp_kb_dir):
+        from knowlin_mcp.db import KnowledgeDB
+
+        embeddings = np.array([[1.0, 0.0]], dtype=np.float32)
+        np.save(str(temp_kb_dir / "embeddings.npy"), embeddings)
+        (temp_kb_dir / "index.json").write_text(json.dumps({"id1": 0}))
+        (temp_kb_dir / "entries.jsonl").write_text(
+            json.dumps({"id": "id1", "title": "Entry Title", "insight": "Entry insight"}) + "\n"
+        )
+
+        db = KnowledgeDB(str(temp_kb_dir.parent))
+
+        np.testing.assert_array_equal(db._embeddings, embeddings)
 
 
 # =============================================================================
@@ -516,6 +531,12 @@ class TestSubStore:
         assert db.sub_store == "sessions"
         assert "sessions" in str(db.jsonl_path)
         assert (temp_kb_dir / "sessions").is_dir()
+
+    def test_sub_store_rejects_escape(self, temp_kb_dir):
+        from knowlin_mcp.db import KnowledgeDB
+
+        with pytest.raises(ValueError, match="Sub-store path escapes knowledge DB"):
+            KnowledgeDB(str(temp_kb_dir.parent), sub_store="../../escape")
 
     def test_sub_stores_are_independent(self, temp_kb_dir):
         from knowlin_mcp.db import KnowledgeDB

@@ -740,6 +740,22 @@ class TestSourcesConfig:
         assert "readme.md" in names
         assert "wip.md" not in names
 
+    def test_skips_symlinked_files(self, tmp_path):
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        external = tmp_path / "secret.md"
+        external.write_text("# Secret\n\nSensitive content that must not be indexed.")
+        (docs / "linked.md").symlink_to(external)
+
+        ingester = DocsIngester.__new__(DocsIngester)
+        ingester.docs_dirs = [docs]
+        ingester._include_globs = None
+        ingester._exclude_globs = []
+
+        files = ingester._find_doc_files()
+
+        assert files == []
+
     def test_fallback_to_convention_when_no_config(self, tmp_path):
         project = tmp_path / "project"
         project.mkdir()

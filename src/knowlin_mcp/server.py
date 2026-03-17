@@ -186,7 +186,7 @@ class KnowledgeServer:
 
     def _cmd_search(self, request: dict) -> dict:
         query = request.get("query", "")
-        limit = request.get("limit", 5)
+        limit = min(request.get("limit", 5), 50)
         date_from = request.get("date_from")
         date_to = request.get("date_to")
         entry_type = request.get("entry_type")
@@ -229,7 +229,7 @@ class KnowledgeServer:
     def _cmd_status(self, request: dict) -> dict:
         return {
             "status": "running",
-            "project": str(self.project_root),
+            "project": self.project_root.name,
             "port": self.port,
             "load_time": self.load_time,
             "index_loaded": self.db is not None,
@@ -271,7 +271,7 @@ class KnowledgeServer:
         if err := self._require_db():
             return err
         try:
-            limit = request.get("limit", 3)
+            limit = min(request.get("limit", 3), 50)
             entries = self.db.get_recent_important(limit)
             return {"status": "ok", "entries": entries}
         except Exception as e:
@@ -285,7 +285,7 @@ class KnowledgeServer:
             return {"error": "Missing 'start' date parameter"}
         try:
             end_date = request.get("end")
-            limit = request.get("limit", 50)
+            limit = min(request.get("limit", 50), 50)
             entries = self.db.search_by_date(start_date, end_date, limit)
             return {"status": "ok", "entries": entries, "count": len(entries)}
         except Exception as e:
@@ -413,9 +413,14 @@ class KnowledgeServer:
                 response = handler(request)
 
             conn.sendall(json.dumps(response).encode("utf-8"))
-        except Exception as e:
+        except Exception:
+            logger.exception("[server] Failed to handle client request")
             try:
-                conn.sendall(json.dumps({"error": str(e)}).encode("utf-8"))
+                conn.sendall(
+                    json.dumps(
+                        {"status": "error", "error": "internal server error"}
+                    ).encode("utf-8")
+                )
             except OSError:
                 pass
         finally:

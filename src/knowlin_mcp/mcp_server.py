@@ -9,6 +9,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
 from knowlin_mcp.platform import find_project_root
+from knowlin_mcp.utils import logger
 
 mcp = FastMCP(
     "knowlin-mcp",
@@ -121,8 +122,9 @@ def knowlin_search(
 
         return "\n".join(lines)
 
-    except Exception as e:
-        raise ToolError(f"Search error: {e}") from e
+    except Exception:
+        logger.exception("[mcp] Search failed")
+        raise ToolError("Operation failed")
 
 
 @mcp.tool(title="Get Knowledge Entry", annotations=_READ_ONLY)
@@ -146,8 +148,9 @@ def knowlin_get(entry_id: str) -> str:
 
         return f"Entry not found: {entry_id}"
 
-    except Exception as e:
-        raise ToolError(f"Get error: {e}") from e
+    except Exception:
+        logger.exception("[mcp] Get failed")
+        raise ToolError("Operation failed")
 
 
 def _format_full_entry(entry: dict, source: str) -> str:
@@ -218,8 +221,9 @@ def knowlin_stats() -> str:
 
         return "\n".join(lines)
 
-    except Exception as e:
-        raise ToolError(f"Stats error: {e}") from e
+    except Exception:
+        logger.exception("[mcp] Stats failed")
+        raise ToolError("Operation failed")
 
 
 @mcp.tool(title="Ingest Documents & Sessions", annotations=_WRITE)
@@ -257,8 +261,9 @@ def knowlin_ingest(source: str = "all") -> str:
 
         return "\n".join(results)
 
-    except Exception as e:
-        raise ToolError(f"Ingest error: {e}") from e
+    except Exception:
+        logger.exception("[mcp] Ingest failed")
+        raise ToolError("Operation failed")
 
 
 @mcp.tool(title="Capture Knowledge Entry", annotations=_WRITE)
@@ -313,8 +318,9 @@ def knowlin_capture(
             return f"Saved: {entry.get('title', title)} (ID: {entry.get('id', '?')})"
         return "Failed to save entry. Check that .knowledge-db/ exists."
 
-    except Exception as e:
-        raise ToolError(f"Capture error: {e}") from e
+    except Exception:
+        logger.exception("[mcp] Capture failed")
+        raise ToolError("Operation failed")
 
 
 def main():

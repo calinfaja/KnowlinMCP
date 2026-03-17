@@ -178,11 +178,15 @@ class TestKnowlinSearch:
             call_kwargs = mock_mss.search.call_args[1]
             assert call_kwargs["limit"] == 20
 
-    @patch("knowlin_mcp.mcp_server._get_project_root", side_effect=RuntimeError("no root"))
+    @patch(
+        "knowlin_mcp.mcp_server._get_project_root",
+        side_effect=RuntimeError("no root at /tmp/private/project"),
+    )
     def test_error_raises_tool_error(self, _):
         """Search raises ToolError when project root not found."""
-        with pytest.raises(ToolError, match="Search error"):
+        with pytest.raises(ToolError, match="Operation failed") as excinfo:
             knowlin_search("query")
+        assert "/tmp/private/project" not in str(excinfo.value)
 
 
 # --- knowlin_get ---
@@ -240,7 +244,7 @@ class TestKnowlinGet:
 
     @patch("knowlin_mcp.mcp_server._get_project_root", side_effect=RuntimeError("no root"))
     def test_error_raises_tool_error(self, _):
-        with pytest.raises(ToolError, match="Get error"):
+        with pytest.raises(ToolError, match="Operation failed"):
             knowlin_get("e1")
 
 
@@ -282,7 +286,7 @@ class TestKnowlinStats:
 
     @patch("knowlin_mcp.mcp_server._get_project_root", side_effect=RuntimeError("no root"))
     def test_error_raises_tool_error(self, _):
-        with pytest.raises(ToolError, match="Stats error"):
+        with pytest.raises(ToolError, match="Operation failed"):
             knowlin_stats()
 
 
@@ -334,7 +338,7 @@ class TestKnowlinIngest:
 
     @patch("knowlin_mcp.mcp_server._get_project_root", side_effect=RuntimeError("no root"))
     def test_error_raises_tool_error(self, _):
-        with pytest.raises(ToolError, match="Ingest error"):
+        with pytest.raises(ToolError, match="Operation failed"):
             knowlin_ingest()
 
 
