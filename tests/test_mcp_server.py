@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 
 from knowlin_mcp import mcp_server
@@ -407,13 +409,45 @@ class TestKnowlinCapture:
         mock_create.assert_called_once()
         mock_save.assert_called_once()
 
+    def test_capture_writes_entry_to_entries_jsonl(self, monkeypatch, tmp_path):
+        project_root = tmp_path / "project"
+        kb_dir = project_root / ".knowledge-db"
+        kb_dir.mkdir(parents=True)
+
+        class FakeDenseModel:
+            def embed(self, texts):
+                for _ in texts:
+                    yield np.array([1.0, 0.0], dtype=np.float32)
+
+        monkeypatch.setattr("knowlin_mcp.capture.send_entry_to_server", lambda *_: False)
+        monkeypatch.setattr("knowlin_mcp.capture._notify_server_reload", lambda *_: None)
+        monkeypatch.setattr("knowlin_mcp.db.get_dense_model", lambda: FakeDenseModel())
+        monkeypatch.setattr("knowlin_mcp.db.get_sparse_model", lambda: None)
+
+        with patch("knowlin_mcp.mcp_server._get_project_root", return_value=str(project_root)):
+            with patch("knowlin_mcp.mcp_server.find_project_root", return_value=project_root):
+                result = knowlin_capture(
+                    title="Captured MCP insight",
+                    insight="This should land in the project knowledge store",
+                    entry_type="finding",
+                    keywords="mcp,test",
+                    priority="medium",
+                )
+
+        entries_path = kb_dir / "entries.jsonl"
+        assert entries_path.exists()
+        with open(entries_path) as f:
+            entries = [json.loads(line) for line in f if line.strip()]
+
+        assert len(entries) == 1
+        assert entries[0]["title"] == "Captured MCP insight"
+        assert "Saved" in result
+
     @patch("knowlin_mcp.mcp_server._get_project_root")
     def test_capture_invalid_type(self, mock_root, tmp_path):
         mock_root.return_value = str(tmp_path)
 
-        result = knowlin_capture(
-            title="Test", insight="Test", entry_type="invalid"
-        )
+        result = knowlin_capture(title="Test", insight="Test", entry_type="invalid")
 
         assert "Invalid type" in result
 
@@ -421,8 +455,6 @@ class TestKnowlinCapture:
     def test_capture_invalid_priority(self, mock_root, tmp_path):
         mock_root.return_value = str(tmp_path)
 
-        result = knowlin_capture(
-            title="Test", insight="Test", priority="urgent"
-        )
+        result = knowlin_capture(title="Test", insight="Test", priority="urgent")
 
         assert "Invalid priority" in result

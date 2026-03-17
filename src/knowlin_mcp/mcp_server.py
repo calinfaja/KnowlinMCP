@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
@@ -294,15 +296,17 @@ def knowlin_capture(
 
         kw_list = [k.strip() for k in keywords.split(",") if k.strip()] if keywords else []
 
-        entry = create_entry_from_json({
-            "title": title,
-            "insight": insight,
-            "type": entry_type,
-            "keywords": kw_list,
-            "priority": priority,
-        })
+        entry = create_entry_from_json(
+            {
+                "title": title,
+                "insight": insight,
+                "type": entry_type,
+                "keywords": kw_list,
+                "priority": priority,
+            }
+        )
 
-        kb_dir = str(find_project_root() or root)
+        kb_dir = Path(find_project_root() or root) / ".knowledge-db"
         saved = save_entry(entry, kb_dir)
 
         if saved:

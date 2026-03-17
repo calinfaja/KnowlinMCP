@@ -62,9 +62,7 @@ class TestMultiSourceSearch:
     def test_search_applies_source_weights(self, mock_db_cls, tmp_path):
         mock_db = MagicMock()
         mock_db.count.return_value = 1
-        mock_db.search.return_value = [
-            {"title": "Result", "insight": "content", "score": 0.8}
-        ]
+        mock_db.search.return_value = [{"title": "Result", "insight": "content", "score": 0.8}]
         mock_db_cls.return_value = mock_db
 
         ms = MultiSourceSearch(str(tmp_path))
@@ -127,9 +125,7 @@ class TestMultiSourceSearch:
     def test_search_meta_contains_intent(self, mock_db_cls, tmp_path):
         mock_db = MagicMock()
         mock_db.count.return_value = 1
-        mock_db.search.return_value = [
-            {"title": "Result", "insight": "content"}
-        ]
+        mock_db.search.return_value = [{"title": "Result", "insight": "content"}]
         mock_db_cls.return_value = mock_db
 
         ms = MultiSourceSearch(str(tmp_path))

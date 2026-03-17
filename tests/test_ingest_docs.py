@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 
 from knowlin_mcp.ingest_docs import (
@@ -154,7 +155,8 @@ class TestChunkByHeadings:
         ingester = DocsIngester.__new__(DocsIngester)
         # Create a very long section
         long_text = (
-            "# Title\n\n" + "x" * (MAX_CHUNK_CHARS * 3)
+            "# Title\n\n"
+            + "x" * (MAX_CHUNK_CHARS * 3)
             + "\n\n## Next\n\nShort content that is long enough to pass"
             " the minimum threshold for chunking in tests."
         )
@@ -520,6 +522,51 @@ class TestCleanup:
         for entry in registry.values():
             assert entry["entry_ids"] == ["id2"]
 
+    def test_partial_edit_preserves_unchanged_chunks(self, tmp_path, docs_dir, monkeypatch):
+        from knowlin_mcp.db import KnowledgeDB
+
+        class ZeroDenseModel:
+            def embed(self, texts):
+                for _ in texts:
+                    yield np.zeros(384, dtype=np.float32)
+
+        monkeypatch.setattr("knowlin_mcp.db.get_dense_model", lambda: ZeroDenseModel())
+        monkeypatch.setattr("knowlin_mcp.db.get_sparse_model", lambda: None)
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / ".knowledge-db").mkdir()
+
+        doc = docs_dir / "guide.md"
+        doc.write_text(
+            "## A Section\n\n"
+            "Content for section A that is long enough to be indexed properly.\n\n"
+            "## B Section\n\n"
+            "Original content for section B that is also long enough to be indexed.\n\n"
+            "## C Section\n\n"
+            "Content for section C that should remain unchanged after re-ingest."
+        )
+
+        ingester = DocsIngester(str(project), docs_path=str(docs_dir))
+        assert ingester.ingest() == 3
+
+        doc.write_text(
+            "## A Section\n\n"
+            "Content for section A that is long enough to be indexed properly.\n\n"
+            "## B Section\n\n"
+            "Updated content for section B after a partial edit to the document.\n\n"
+            "## C Section\n\n"
+            "Content for section C that should remain unchanged after re-ingest."
+        )
+
+        ingester = DocsIngester(str(project), docs_path=str(docs_dir))
+        assert ingester.ingest() == 3
+
+        db = KnowledgeDB(str(project), sub_store="docs")
+        assert db.count() == 3
+        titles = {entry.get("title") for entry in db.list_recent(limit=10)}
+        assert titles == {"A Section", "B Section", "C Section"}
+
     @patch("knowlin_mcp.db.KnowledgeDB")
     def test_entry_ids_stored_in_registry(self, mock_db_cls, tmp_path, docs_dir):
         mock_db = MagicMock()
@@ -701,6 +748,7 @@ class TestSessionSourcesConfig:
         (project / ".knowledge-db").mkdir()
 
         from knowlin_mcp.ingest_sessions import SessionIngester
+
         SessionIngester(str(project))  # should not raise
         # auto_discover is True by default, sessions_dir may be None
         # if no claude projects dir exists -- that's fine
@@ -718,6 +766,7 @@ class TestSessionSourcesConfig:
         config.write_text(f"sessions:\n  path: {custom_sessions}\n")
 
         from knowlin_mcp.ingest_sessions import SessionIngester
+
         ingester = SessionIngester(str(project))
         assert ingester.sessions_dir == custom_sessions.resolve()
 
@@ -734,6 +783,7 @@ class TestSessionSourcesConfig:
         override.mkdir()
 
         from knowlin_mcp.ingest_sessions import SessionIngester
+
         ingester = SessionIngester(str(project), sessions_dir=str(override))
         assert ingester.sessions_dir == override
 
@@ -747,5 +797,6 @@ class TestSessionSourcesConfig:
         config.write_text("sessions:\n  auto_discover: false\n")
 
         from knowlin_mcp.ingest_sessions import SessionIngester
+
         ingester = SessionIngester(str(project))
         assert ingester.sessions_dir is None

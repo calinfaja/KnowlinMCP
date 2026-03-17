@@ -140,19 +140,21 @@ class CodexIngester:
 
                     date_str = self._extract_date(path)
 
-                    entries.append({
-                        "title": title,
-                        "insight": insight,
-                        "type": entry_type or "session",
-                        "priority": "high" if score > 0.7 else "medium",
-                        "keywords": [],
-                        "source": f"codex:{path.name}",
-                        "date": date_str,
-                        "timestamp": datetime.now().isoformat(),
-                        "branch": "",
-                        "related_to": [],
-                        "_importance_score": score,
-                    })
+                    entries.append(
+                        {
+                            "title": title,
+                            "insight": insight,
+                            "type": entry_type or "session",
+                            "priority": "high" if score > 0.7 else "medium",
+                            "keywords": [],
+                            "source": f"codex:{path.name}",
+                            "date": date_str,
+                            "timestamp": datetime.now().isoformat(),
+                            "branch": "",
+                            "related_to": [],
+                            "_importance_score": score,
+                        }
+                    )
 
         except Exception as e:
             debug_log(f"Failed to parse {path}: {e}")
@@ -285,6 +287,13 @@ class CodexIngester:
 
         # Batch add first, then remove old entries (crash-safe ordering)
         ids = db.batch_add(all_entries, check_duplicates=False)
+        accepted_count = sum(1 for entry_id in ids if entry_id is not None)
+
+        rejected_count = sum(1 for entry_id in ids if entry_id is None)
+        if rejected_count:
+            debug_log(
+                f"Warning: DB validation rejected {rejected_count} Codex entries during batch_add."
+            )
 
         for path in to_process:
             old_ids = self._registry.get(str(path), {}).get("entry_ids", [])
@@ -293,7 +302,8 @@ class CodexIngester:
 
         offset = 0
         for file_key, count in file_entry_counts:
-            file_ids = ids[offset:offset + count] if count > 0 else []
+            raw_file_ids = ids[offset : offset + count] if count > 0 else []
+            file_ids = [entry_id for entry_id in raw_file_ids if entry_id is not None]
             self._registry[file_key] = {
                 "hash": file_hashes.get(file_key) or self._file_hash(Path(file_key)),
                 "processed": datetime.now().isoformat(),
@@ -303,5 +313,5 @@ class CodexIngester:
             offset += count
 
         self._save_registry()
-        debug_log(f"Ingested {len(ids)} entries from {len(to_process)} Codex sessions")
-        return len(ids)
+        debug_log(f"Ingested {accepted_count} entries from {len(to_process)} Codex sessions")
+        return accepted_count

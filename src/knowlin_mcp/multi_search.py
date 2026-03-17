@@ -127,8 +127,7 @@ class MultiSourceSearch:
         if len(active_stores) > 1:
             with ThreadPoolExecutor(max_workers=len(active_stores)) as executor:
                 futures = {
-                    executor.submit(_search_source, src, st): src
-                    for src, st in active_stores
+                    executor.submit(_search_source, src, st): src for src, st in active_stores
                 }
                 for future in as_completed(futures):
                     source = futures[future]

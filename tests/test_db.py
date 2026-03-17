@@ -16,6 +16,25 @@ from datetime import datetime, timedelta
 
 import numpy as np
 
+
+class KeywordDenseModel:
+    """Small fake dense model for deterministic unit tests."""
+
+    def __init__(self, vectors_by_keyword):
+        self.vectors_by_keyword = vectors_by_keyword
+        self.default = np.zeros(len(next(iter(vectors_by_keyword.values()))), dtype=np.float32)
+
+    def embed(self, texts):
+        for text in texts:
+            lowered = text.lower()
+            for keyword, vector in self.vectors_by_keyword.items():
+                if keyword in lowered:
+                    yield vector.copy()
+                    break
+            else:
+                yield self.default.copy()
+
+
 # =============================================================================
 # TestRRFScore
 # =============================================================================
@@ -217,6 +236,30 @@ class TestRebuildIndex:
         assert (kb_with_entries / "index.json").exists()
 
 
+class TestAtomicIndexWrites:
+    """Tests for atomic index persistence."""
+
+    def test_save_index_cleans_up_tmp_files(self, temp_kb_dir):
+        from knowlin_mcp.db import KnowledgeDB
+
+        db = KnowledgeDB(str(temp_kb_dir.parent))
+        db._embeddings = np.array([[1.0, 0.0]], dtype=np.float32)
+        db._id_to_row = {"entry-1": 0}
+        db._row_to_id = {0: "entry-1"}
+        db._entries = [{"id": "entry-1", "title": "Atomic entry", "insight": "Persist safely"}]
+        db._sparse_vectors = {0: {"token": 0.5}}
+
+        db._save_index()
+
+        assert list(temp_kb_dir.glob("*.tmp")) == []
+        np.testing.assert_array_equal(
+            np.load(temp_kb_dir / "embeddings.npy"),
+            np.array([[1.0, 0.0]], dtype=np.float32),
+        )
+        assert json.loads((temp_kb_dir / "index.json").read_text()) == {"entry-1": 0}
+        assert json.loads((temp_kb_dir / "sparse_index.json").read_text()) == {"0": {"token": 0.5}}
+
+
 # =============================================================================
 # TestAddEntry
 # =============================================================================
@@ -281,7 +324,26 @@ class TestBatchAdd:
         ]
         ids = db.batch_add(entries)
 
-        assert len(ids) == 2
+        assert len(ids) == 3
+        assert ids[1] is None
+        assert db.count() == 2
+
+    def test_batch_add_returns_none_for_rejected(self, temp_kb_dir):
+        from knowlin_mcp.db import KnowledgeDB
+
+        db = KnowledgeDB(str(temp_kb_dir.parent))
+        entries = [
+            {"title": "Accepted entry", "insight": "Good content"},
+            {"title": "Singleword", "insight": "Rejected because title has one word"},
+            {"title": "Another accepted entry", "insight": "More good content"},
+        ]
+
+        ids = db.batch_add(entries)
+
+        assert len(ids) == 3
+        assert ids[0] is not None
+        assert ids[1] is None
+        assert ids[2] is not None
         assert db.count() == 2
 
     def test_batch_add_empty_list(self, temp_kb_dir):
@@ -329,6 +391,61 @@ class TestRemoveEntries:
         ids_in_file = [e.get("id") for e in lines]
         assert id2 not in ids_in_file
         assert id1 in ids_in_file
+
+    def test_remove_middle_entry_preserves_others(self, monkeypatch, temp_kb_dir):
+        from knowlin_mcp.db import KnowledgeDB
+
+        dense_model = KeywordDenseModel(
+            {
+                "alpha": np.array([1.0, 0.0, 0.0], dtype=np.float32),
+                "beta": np.array([0.0, 1.0, 0.0], dtype=np.float32),
+                "gamma": np.array([0.0, 0.0, 1.0], dtype=np.float32),
+            }
+        )
+        monkeypatch.setattr("knowlin_mcp.db.get_dense_model", lambda: dense_model)
+        monkeypatch.setattr("knowlin_mcp.db.get_sparse_model", lambda: None)
+
+        db = KnowledgeDB(str(temp_kb_dir.parent))
+        id1 = db.add({"title": "Alpha entry data", "insight": "Alpha details"})
+        id2 = db.add({"title": "Beta entry data", "insight": "Beta details"})
+        id3 = db.add({"title": "Gamma entry data", "insight": "Gamma details"})
+
+        removed = db.remove_entries([id2])
+
+        assert removed == 1
+        assert db.get(id1)["title"] == "Alpha entry data"
+        assert db.get(id2) is None
+        assert db.get(id3)["title"] == "Gamma entry data"
+        assert db.search("alpha", limit=3, rerank=False)[0]["id"] == id1
+        assert db.search("gamma", limit=3, rerank=False)[0]["id"] == id3
+
+    def test_add_after_remove(self, monkeypatch, temp_kb_dir):
+        from knowlin_mcp.db import KnowledgeDB
+
+        dense_model = KeywordDenseModel(
+            {
+                "alpha": np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32),
+                "beta": np.array([0.0, 1.0, 0.0, 0.0], dtype=np.float32),
+                "gamma": np.array([0.0, 0.0, 1.0, 0.0], dtype=np.float32),
+                "delta": np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32),
+            }
+        )
+        monkeypatch.setattr("knowlin_mcp.db.get_dense_model", lambda: dense_model)
+        monkeypatch.setattr("knowlin_mcp.db.get_sparse_model", lambda: None)
+
+        db = KnowledgeDB(str(temp_kb_dir.parent))
+        id1 = db.add({"title": "Alpha entry data", "insight": "Alpha details"})
+        id2 = db.add({"title": "Beta entry data", "insight": "Beta details"})
+        id3 = db.add({"title": "Gamma entry data", "insight": "Gamma details"})
+
+        db.remove_entries([id2])
+        id4 = db.add({"title": "Delta entry data", "insight": "Delta details"})
+
+        assert db._embeddings is not None
+        assert db._embeddings.shape[0] == 3
+        assert db.search("alpha", limit=3, rerank=False)[0]["id"] == id1
+        assert db.search("gamma", limit=3, rerank=False)[0]["id"] == id3
+        assert db.search("delta", limit=3, rerank=False)[0]["id"] == id4
 
 
 # =============================================================================
@@ -418,16 +535,20 @@ class TestExponentialTimeDecay:
         old_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
         db.add(
             {
-                "title": "Old finding", "insight": "This is old",
-                "date": old_date, "priority": "medium",
+                "title": "Old finding",
+                "insight": "This is old",
+                "date": old_date,
+                "priority": "medium",
             },
             check_duplicates=False,
         )
         today = datetime.now().strftime("%Y-%m-%d")
         db.add(
             {
-                "title": "New finding", "insight": "This is new",
-                "date": today, "priority": "medium",
+                "title": "New finding",
+                "insight": "This is new",
+                "date": today,
+                "priority": "medium",
             },
             check_duplicates=False,
         )
@@ -447,23 +568,43 @@ class TestExponentialTimeDecay:
         old_date = (datetime.now() - timedelta(days=14)).strftime("%Y-%m-%d")
 
         db.add(
-            {"title": "Fresh warning today", "insight": "Don't use this pattern",
-             "type": "warning", "date": today, "priority": "medium"},
+            {
+                "title": "Fresh warning today",
+                "insight": "Don't use this pattern",
+                "type": "warning",
+                "date": today,
+                "priority": "medium",
+            },
             check_duplicates=False,
         )
         db.add(
-            {"title": "Old warning two weeks ago", "insight": "Avoid this other thing",
-             "type": "warning", "date": old_date, "priority": "medium"},
+            {
+                "title": "Old warning two weeks ago",
+                "insight": "Avoid this other thing",
+                "type": "warning",
+                "date": old_date,
+                "priority": "medium",
+            },
             check_duplicates=False,
         )
         db.add(
-            {"title": "Fresh finding today", "insight": "Discovered this behavior",
-             "type": "finding", "date": today, "priority": "medium"},
+            {
+                "title": "Fresh finding today",
+                "insight": "Discovered this behavior",
+                "type": "finding",
+                "date": today,
+                "priority": "medium",
+            },
             check_duplicates=False,
         )
         db.add(
-            {"title": "Old finding two weeks ago", "insight": "Discovered that behavior",
-             "type": "finding", "date": old_date, "priority": "medium"},
+            {
+                "title": "Old finding two weeks ago",
+                "insight": "Discovered that behavior",
+                "type": "finding",
+                "date": old_date,
+                "priority": "medium",
+            },
             check_duplicates=False,
         )
 
@@ -495,8 +636,10 @@ class TestSemanticDeduplication:
         db = KnowledgeDB(str(temp_kb_dir.parent))
 
         db.add(
-            {"title": "BLE power optimization",
-             "insight": "Use sleep modes for better battery life"}
+            {
+                "title": "BLE power optimization",
+                "insight": "Use sleep modes for better battery life",
+            }
         )
         db.add(
             {"title": "Python async patterns", "insight": "Use asyncio for I/O bound operations"}
@@ -513,3 +656,25 @@ class TestSemanticDeduplication:
         db.add({"title": "Test entry", "insight": "Test content"}, check_duplicates=False)
 
         assert db._embeddings.shape[0] == 2
+
+    def test_dedup_rejects_near_identical(self, monkeypatch, temp_kb_dir):
+        from knowlin_mcp.db import KnowledgeDB
+
+        base_vec = np.array([1.0, 0.0], dtype=np.float32)
+
+        dense_model = KeywordDenseModel({"duplicate": base_vec})
+        monkeypatch.setattr("knowlin_mcp.db.get_dense_model", lambda: dense_model)
+        monkeypatch.setattr("knowlin_mcp.db.get_dense_embedding", lambda text: base_vec)
+        monkeypatch.setattr("knowlin_mcp.db.get_sparse_model", lambda: None)
+
+        db = KnowledgeDB(str(temp_kb_dir.parent))
+        first_id = db.add({"title": "Duplicate entry data", "insight": "Duplicate insight content"})
+        second_id = db.add(
+            {"title": "Duplicate variant data", "insight": "Duplicate insight content"}
+        )
+
+        with open(temp_kb_dir / "entries.jsonl") as f:
+            lines = [line for line in f if line.strip()]
+
+        assert second_id == first_id
+        assert len(lines) == 1

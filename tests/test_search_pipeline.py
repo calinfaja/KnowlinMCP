@@ -96,38 +96,33 @@ class TestPostRRFFiltering:
     """Post-RRF filters on date, type, and branch."""
 
     def test_date_from_filter(self, search_db):
-        results = search_db.search(
-            "best practices", rerank=False, limit=10, date_from="2026-02-01"
-        )
+        results = search_db.search("best practices", rerank=False, limit=10, date_from="2026-02-01")
         for r in results:
             assert r.get("date", "") >= "2026-02-01"
 
     def test_date_to_filter(self, search_db):
-        results = search_db.search(
-            "best practices", rerank=False, limit=10, date_to="2026-01-31"
-        )
+        results = search_db.search("best practices", rerank=False, limit=10, date_to="2026-01-31")
         for r in results:
             assert r.get("date", "") <= "2026-01-31"
 
     def test_date_range_filter(self, search_db):
         results = search_db.search(
-            "optimization", rerank=False, limit=10,
-            date_from="2026-01-01", date_to="2026-01-31",
+            "optimization",
+            rerank=False,
+            limit=10,
+            date_from="2026-01-01",
+            date_to="2026-01-31",
         )
         for r in results:
             assert "2026-01-01" <= r.get("date", "") <= "2026-01-31"
 
     def test_type_filter(self, search_db):
-        results = search_db.search(
-            "practices", rerank=False, limit=10, entry_type="warning"
-        )
+        results = search_db.search("practices", rerank=False, limit=10, entry_type="warning")
         for r in results:
             assert r["type"] == "warning"
 
     def test_branch_filter(self, search_db):
-        results = search_db.search(
-            "caching", rerank=False, limit=10, branch="feature/cache"
-        )
+        results = search_db.search("caching", rerank=False, limit=10, branch="feature/cache")
         for r in results:
             assert r["branch"] == "feature/cache"
 

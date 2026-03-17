@@ -24,9 +24,9 @@ from typing import Any
 from knowlin_mcp.utils import debug_log
 
 # BGE-small-en-v1.5 max input is 512 tokens (~2000 chars)
-MAX_CHUNK_CHARS = 1600   # ~400 tokens
-MIN_CHUNK_CHARS = 50     # Merge tiny chunks with neighbors
-OVERLAP_CHARS = 200      # ~50 tokens overlap for sub-splits
+MAX_CHUNK_CHARS = 1600  # ~400 tokens
+MIN_CHUNK_CHARS = 50  # Merge tiny chunks with neighbors
+OVERLAP_CHARS = 200  # ~50 tokens overlap for sub-splits
 
 SOURCES_CONFIG_FILE = "sources.yaml"
 
@@ -41,6 +41,7 @@ def load_sources_config(db_path: Path) -> dict | None:
         return None
     try:
         import yaml
+
         return yaml.safe_load(config_path.read_text()) or {}
     except ImportError:
         debug_log("pyyaml not installed, ignoring sources.yaml")
@@ -93,9 +94,7 @@ class DocsIngester:
             # CLI --path flag always wins
             self.docs_dirs = [Path(docs_path).resolve()]
         elif docs_config.get("paths"):
-            self.docs_dirs = _resolve_paths(
-                docs_config["paths"], self.project_path
-            )
+            self.docs_dirs = _resolve_paths(docs_config["paths"], self.project_path)
         else:
             self.docs_dirs = self._find_docs_dirs()
 
@@ -159,6 +158,7 @@ class DocsIngester:
         """Convert PDF to markdown using pymupdf4llm."""
         try:
             import pymupdf4llm
+
             return pymupdf4llm.to_markdown(str(path))
         except ImportError:
             debug_log("pymupdf4llm not installed. Run: pip install 'knowlin-mcp[pdf]'")
@@ -186,11 +186,9 @@ class DocsIngester:
 
         for match in heading_pattern.finditer(text):
             # Save content before this heading
-            content = text[last_pos:match.start()].strip()
+            content = text[last_pos : match.start()].strip()
             if content and len(content) >= MIN_CHUNK_CHARS:
-                chunks.append(self._make_chunk(
-                    content, last_heading, heading_stack, source_path
-                ))
+                chunks.append(self._make_chunk(content, last_heading, heading_stack, source_path))
 
             # Update heading stack
             level = len(match.group(1))
@@ -207,9 +205,7 @@ class DocsIngester:
         # Don't forget the last section
         content = text[last_pos:].strip()
         if content and len(content) >= MIN_CHUNK_CHARS:
-            chunks.append(self._make_chunk(
-                content, last_heading, heading_stack, source_path
-            ))
+            chunks.append(self._make_chunk(content, last_heading, heading_stack, source_path))
 
         # Sub-split oversized chunks
         final_chunks = []
@@ -231,10 +227,7 @@ class DocsIngester:
     ) -> dict[str, Any]:
         """Create an entry dict from a chunk of text."""
         # Build heading hierarchy as context
-        hierarchy = " > ".join(
-            heading_stack[level]
-            for level in sorted(heading_stack.keys())
-        )
+        hierarchy = " > ".join(heading_stack[level] for level in sorted(heading_stack.keys()))
 
         title = heading or content[:80].split("\n")[0]
         if len(title) > 100:
@@ -281,9 +274,7 @@ class DocsIngester:
 
         return sub_chunks
 
-    def _recursive_split(
-        self, text: str, separators: list[str], max_size: int
-    ) -> list[str]:
+    def _recursive_split(self, text: str, separators: list[str], max_size: int) -> list[str]:
         """Recursively split text using separator hierarchy."""
         if len(text) <= max_size:
             return [text]
@@ -312,7 +303,7 @@ class DocsIngester:
                 return result
 
         # Last resort: hard split
-        return [text[i:i + max_size] for i in range(0, len(text), max_size - OVERLAP_CHARS)]
+        return [text[i : i + max_size] for i in range(0, len(text), max_size - OVERLAP_CHARS)]
 
     def _find_doc_files(self) -> list[Path]:
         """Find document files using include/exclude globs from config."""
@@ -334,15 +325,19 @@ class DocsIngester:
 
                 # Include filter
                 if self._include_globs:
-                    if not any(fnmatch.fnmatch(rel, g) or fnmatch.fnmatch(path.name, g)
-                               for g in self._include_globs):
+                    if not any(
+                        fnmatch.fnmatch(rel, g) or fnmatch.fnmatch(path.name, g)
+                        for g in self._include_globs
+                    ):
                         continue
                 elif extensions and path.suffix.lower() not in extensions:
                     continue
 
                 # Exclude filter
-                if any(fnmatch.fnmatch(rel, g) or fnmatch.fnmatch(path.name, g)
-                       for g in self._exclude_globs):
+                if any(
+                    fnmatch.fnmatch(rel, g) or fnmatch.fnmatch(path.name, g)
+                    for g in self._exclude_globs
+                ):
                     continue
 
                 files.append(path)
@@ -432,8 +427,9 @@ class DocsIngester:
         # Chunk and collect new entries, tracking per-file boundaries
         all_entries = []
         file_entry_counts: list[tuple[str, int]] = []  # (file_key, count)
-        file_new_hashes: dict[str, list[str]] = {}
+        file_chunk_hashes: dict[str, list[str]] = {}
         file_chunk_counts: dict[str, int] = {}
+        file_new_chunk_counts: dict[str, int] = {}
 
         for path in to_process:
             file_key = str(path)
@@ -461,27 +457,28 @@ class DocsIngester:
 
             chunks = self._chunk_by_headings(content, source_path)
 
-            # Diff against existing chunks if file was previously processed
-            old_hashes = set(
-                self._registry.get(file_key, {}).get("chunk_hashes", [])
+            old_hashes = set(self._registry.get(file_key, {}).get("chunk_hashes", []))
+            current_hashes = [chunk.get("_content_hash", "") for chunk in chunks]
+            new_chunk_count = sum(
+                1 for chunk_hash in current_hashes if chunk_hash not in old_hashes
             )
-            new_chunks = []
-            new_hashes = []
 
-            for chunk in chunks:
-                chunk_hash = chunk.get("_content_hash", "")
-                new_hashes.append(chunk_hash)
-                if chunk_hash not in old_hashes:
-                    new_chunks.append(chunk)
+            if old_hashes:
+                unchanged_chunk_count = len(chunks) - new_chunk_count
+                debug_log(
+                    f"{Path(file_key).name}: {new_chunk_count} changed/new chunks, "
+                    f"{unchanged_chunk_count} unchanged chunks re-added"
+                )
 
             # Clean internal fields before adding
-            for chunk in new_chunks:
+            for chunk in chunks:
                 chunk.pop("_content_hash", None)
 
-            file_entry_counts.append((file_key, len(new_chunks)))
-            file_new_hashes[file_key] = new_hashes
+            file_entry_counts.append((file_key, len(chunks)))
+            file_chunk_hashes[file_key] = current_hashes
             file_chunk_counts[file_key] = len(chunks)
-            all_entries.extend(new_chunks)
+            file_new_chunk_counts[file_key] = new_chunk_count
+            all_entries.extend(chunks)
 
         if not all_entries:
             # Still update registry for empty/unchanged files
@@ -490,6 +487,7 @@ class DocsIngester:
 
         # Batch add new entries
         ids = db.batch_add(all_entries, check_duplicates=False)
+        accepted_count = sum(1 for entry_id in ids if entry_id is not None)
 
         # Only NOW remove old entries (after batch_add succeeded)
         for file_key, old_ids in old_ids_by_file.items():
@@ -499,17 +497,18 @@ class DocsIngester:
         # Distribute IDs back to registry per file
         offset = 0
         for file_key, count in file_entry_counts:
-            file_ids = ids[offset:offset + count] if count > 0 else []
+            raw_file_ids = ids[offset : offset + count] if count > 0 else []
+            file_ids = [entry_id for entry_id in raw_file_ids if entry_id is not None]
             self._registry[file_key] = {
                 "file_hash": file_hashes.get(file_key) or self._file_hash(Path(file_key)),
                 "processed": datetime.now().isoformat(),
-                "chunk_hashes": file_new_hashes.get(file_key, []),
+                "chunk_hashes": file_chunk_hashes.get(file_key, []),
                 "chunk_count": file_chunk_counts.get(file_key, 0),
-                "new_chunks": count,
+                "new_chunks": file_new_chunk_counts.get(file_key, 0),
                 "entry_ids": file_ids,
             }
             offset += count
 
         self._save_registry()
-        debug_log(f"Ingested {len(ids)} entries from {len(to_process)} documents")
-        return len(ids)
+        debug_log(f"Ingested {accepted_count} entries from {len(to_process)} documents")
+        return accepted_count

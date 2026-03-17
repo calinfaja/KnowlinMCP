@@ -19,7 +19,9 @@ def _get_current_branch() -> str:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, timeout=3,
+            capture_output=True,
+            text=True,
+            timeout=3,
         )
         if result.returncode == 0:
             return result.stdout.strip()
@@ -67,22 +69,12 @@ def create_entry_from_json(data: dict) -> dict:
 
     if not entry_type or entry_type in ("lesson", "best-practice"):
         title = data.get("title", "")
-        insight = (
-            data.get("insight")
-            or data.get("atomic_insight")
-            or data.get("summary")
-            or ""
-        )
+        insight = data.get("insight") or data.get("atomic_insight") or data.get("summary") or ""
         entry_type = infer_type(title, insight)
 
     entry_id = data.get("id") or f"{entry_type}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
-    insight = (
-        data.get("insight")
-        or data.get("atomic_insight")
-        or data.get("summary")
-        or ""
-    )
+    insight = data.get("insight") or data.get("atomic_insight") or data.get("summary") or ""
 
     keywords = data.get("keywords")
     if not keywords:

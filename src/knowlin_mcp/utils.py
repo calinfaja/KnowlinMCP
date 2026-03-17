@@ -78,27 +78,73 @@ SCHEMA_V2_DEFAULTS = {
 
 TYPE_SIGNALS = {
     "warning": [
-        "don't", "dont", "avoid", "never", "careful", "bug", "broken",
-        "fails", "failed", "failure", "gotcha", "watch out", "issue",
-        "problem", "error", "warning", "deprecated", "regression",
-        "won't work", "doesn't work", "not work",
+        "don't",
+        "dont",
+        "avoid",
+        "never",
+        "careful",
+        "bug",
+        "broken",
+        "fails",
+        "failed",
+        "failure",
+        "gotcha",
+        "watch out",
+        "issue",
+        "problem",
+        "error",
+        "warning",
+        "deprecated",
+        "regression",
+        "won't work",
+        "doesn't work",
+        "not work",
     ],
     "solution": [
-        "fixed", "solved", "fix by", "fix:", "solution", "resolved",
-        "workaround", "the fix", "to fix",
+        "fixed",
+        "solved",
+        "fix by",
+        "fix:",
+        "solution",
+        "resolved",
+        "workaround",
+        "the fix",
+        "to fix",
     ],
     "pattern": [
-        "use ", "prefer", "always", "best way", "pattern", "approach",
-        "technique", "how to", "should ", "recommended", "best practice",
+        "use ",
+        "prefer",
+        "always",
+        "best way",
+        "pattern",
+        "approach",
+        "technique",
+        "how to",
+        "should ",
+        "recommended",
+        "best practice",
         "convention",
     ],
     "decision": [
-        "chose", "decided", "picked", "selected", "went with",
-        "instead of", "decision", "trade-off", "tradeoff",
+        "chose",
+        "decided",
+        "picked",
+        "selected",
+        "went with",
+        "instead of",
+        "decision",
+        "trade-off",
+        "tradeoff",
     ],
     "discovery": [
-        "found that", "discovered", "turns out", "TIL", "realized",
-        "learned that", "it turns out", "surprisingly",
+        "found that",
+        "discovered",
+        "turns out",
+        "TIL",
+        "realized",
+        "learned that",
+        "it turns out",
+        "surprisingly",
     ],
 }
 
@@ -294,9 +340,7 @@ def recv_all(sock: socket.socket) -> bytes:
     return b"".join(chunks)
 
 
-def send_command(
-    project_path: str | Path, cmd_data: dict, timeout: float = 5.0
-) -> dict | None:
+def send_command(project_path: str | Path, cmd_data: dict, timeout: float = 5.0) -> dict | None:
     """Send command to KB server for a project. Returns response dict or None."""
     port = get_server_port(project_path)
     if not port:

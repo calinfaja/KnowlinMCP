@@ -51,7 +51,21 @@ def get_runtime_dir() -> Path:
     """
     username = getpass.getuser()
     runtime_dir = Path(tempfile.gettempdir()) / f"knowlin-{username}"
-    runtime_dir.mkdir(parents=True, exist_ok=True)
+    if runtime_dir.exists() and runtime_dir.is_symlink():
+        raise RuntimeError(f"Runtime dir cannot be a symlink: {runtime_dir}")
+
+    runtime_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if runtime_dir.is_symlink():
+        raise RuntimeError(f"Runtime dir cannot be a symlink: {runtime_dir}")
+
+    if hasattr(os, "getuid"):
+        current_uid = os.getuid()
+        if runtime_dir.stat().st_uid != current_uid:
+            raise PermissionError(f"Runtime dir is not owned by the current user: {runtime_dir}")
+
+    if os.name != "nt":
+        runtime_dir.chmod(0o700)
+
     return runtime_dir
 
 
@@ -147,9 +161,7 @@ def spawn_background(
         kwargs["env"] = env
 
     if sys.platform == "win32":
-        kwargs["creationflags"] = (
-            subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
-        )
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
     else:
         kwargs["start_new_session"] = True
 
@@ -204,10 +216,28 @@ def read_pid_file(pid_file: Path) -> int | None:
     return None
 
 
+def write_runtime_file(path: Path, content: str) -> None:
+    """Write a runtime file without following symlinks."""
+    runtime_dir = get_runtime_dir()
+    if path.parent != runtime_dir:
+        raise ValueError(f"Runtime file must live in {runtime_dir}: {path}")
+    if path.exists() and path.is_symlink():
+        raise RuntimeError(f"Refusing to write through symlink: {path}")
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+
+    fd = os.open(path, flags, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(content)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
 def write_pid_file(pid_file: Path, pid: int) -> None:
     """Write a PID to a file."""
-    pid_file.parent.mkdir(parents=True, exist_ok=True)
-    pid_file.write_text(str(pid))
+    write_runtime_file(pid_file, str(pid))
 
 
 def cleanup_stale_files(project_path: Path) -> None:

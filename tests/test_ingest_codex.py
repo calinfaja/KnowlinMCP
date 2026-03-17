@@ -356,7 +356,11 @@ class TestCodexCleanup:
 
     @patch("knowlin_mcp.db.KnowledgeDB")
     def test_deleted_codex_entries_removed(
-        self, mock_db_cls, project_with_codex, codex_dir, sample_codex_jsonl,
+        self,
+        mock_db_cls,
+        project_with_codex,
+        codex_dir,
+        sample_codex_jsonl,
     ):
         mock_db = MagicMock()
         mock_db.batch_add.return_value = ["id1"]

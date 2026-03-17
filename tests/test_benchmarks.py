@@ -62,6 +62,7 @@ class TestBatchAddThroughput:
 
     def test_batch_add_10_entries(self, benchmark, tmp_path_factory):
         """Measure batch_add throughput for 10 entries."""
+
         def add_batch():
             tmp = tmp_path_factory.mktemp("batch")
             project = tmp / "proj"

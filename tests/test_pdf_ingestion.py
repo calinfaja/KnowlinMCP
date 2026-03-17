@@ -77,10 +77,7 @@ class TestPDFIngestion:
         ]
         if sub_chunks:
             # At least one chunk should start with hierarchy
-            has_hierarchy = any(
-                c["insight"].startswith("Installation Guide")
-                for c in sub_chunks
-            )
+            has_hierarchy = any(c["insight"].startswith("Installation Guide") for c in sub_chunks)
             assert has_hierarchy, "Sub-heading chunks should have hierarchy prepended"
 
     def test_pdf_conversion_if_available(self, docs_with_pdf):
@@ -96,6 +93,7 @@ class TestPDFIngestion:
         # pymupdf4llm needs a real PDF - try creating one
         try:
             import fitz  # PyMuPDF
+
             doc = fitz.open()
             page = doc.new_page()
             page.insert_text(

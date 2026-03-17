@@ -21,11 +21,16 @@ import re
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 
-from knowlin_mcp.models import get_dense_model, get_reranker, get_sparse_model
+from knowlin_mcp.models import (
+    get_dense_embedding,
+    get_dense_model,
+    get_reranker,
+    get_sparse_model,
+)
 from knowlin_mcp.platform import find_project_root
 from knowlin_mcp.utils import debug_log, migrate_entry
 
@@ -206,17 +211,40 @@ class KnowledgeDB:
                 self._sparse_vectors = {}
                 self._inverted_index = {}
 
+    def _atomic_write_file(self, path: Path, write_fn: Callable[[Path], None]) -> None:
+        """Write a file atomically via a same-directory temp file."""
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        try:
+            write_fn(tmp_path)
+            fd = os.open(tmp_path, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            os.replace(tmp_path, path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
     def _save_index(self) -> None:
         """Save embeddings, sparse vectors, and index to disk."""
         if self._embeddings is not None:
-            np.save(str(self.embeddings_path), self._embeddings)
-            with open(self.index_path, "w") as f:
-                json.dump(self._id_to_row, f)
+            sparse_data = {str(k): v for k, v in self._sparse_vectors.items()}
 
-            if self._sparse_vectors:
-                sparse_data = {str(k): v for k, v in self._sparse_vectors.items()}
-                with open(self.sparse_index_path, "w") as f:
+            def write_embeddings(tmp_path: Path) -> None:
+                with open(tmp_path, "wb") as f:
+                    np.save(f, self._embeddings)
+
+            def write_index(tmp_path: Path) -> None:
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(self._id_to_row, f)
+
+            def write_sparse_index(tmp_path: Path) -> None:
+                with open(tmp_path, "w", encoding="utf-8") as f:
                     json.dump(sparse_data, f)
+
+            self._atomic_write_file(self.embeddings_path, write_embeddings)
+            self._atomic_write_file(self.index_path, write_index)
+            self._atomic_write_file(self.sparse_index_path, write_sparse_index)
 
             debug_log(f"Saved {len(self._id_to_row)} embeddings to disk")
 
@@ -391,17 +419,20 @@ class KnowledgeDB:
                 return ""
 
         # Semantic deduplication (threshold 0.92)
-        if check_duplicates and self._entries:
-            query = f"{entry.get('title', '')} {entry.get('insight', entry.get('summary', ''))}"
+        if check_duplicates and self._entries and self._embeddings is not None:
+            query_text = (
+                f"{entry.get('title', '')} {entry.get('insight', entry.get('summary', ''))}"
+            )
             try:
-                similar = self.search(query, limit=1, rerank=False)
-                if similar and similar[0].get("score", 0) > self.DEDUP_THRESHOLD:
-                    existing_id = similar[0].get("id")
-                    debug_log(
-                        f"Duplicate detected (score={similar[0]['score']:.2f}): "
-                        f"'{similar[0].get('title', '')[:50]}'"
-                    )
-                    return str(existing_id) if existing_id else ""
+                query_vec = get_dense_embedding(query_text)
+                if query_vec is not None and len(self._embeddings) > 0:
+                    similarities = np.dot(self._embeddings, query_vec)
+                    max_sim = float(np.max(similarities))
+                    if max_sim > self.DEDUP_THRESHOLD:
+                        idx = int(np.argmax(similarities))
+                        existing_id = self._entries[idx].get("id")
+                        debug_log(f"Duplicate detected (sim={max_sim:.3f}): {existing_id}")
+                        return str(existing_id) if existing_id else ""
             except Exception as e:
                 debug_log(f"Dedup check failed (proceeding with add): {e}")
 
@@ -409,9 +440,7 @@ class KnowledgeDB:
         entry["id"] = entry_id
 
         if "date" not in entry:
-            entry["date"] = (
-                entry.get("found_date", "")[:10] or datetime.now().strftime("%Y-%m-%d")
-            )
+            entry["date"] = entry.get("found_date", "")[:10] or datetime.now().strftime("%Y-%m-%d")
 
         if "insight" not in entry and "summary" in entry:
             entry["insight"] = entry["summary"]
@@ -454,7 +483,7 @@ class KnowledgeDB:
 
     def batch_add(
         self, entries: list[dict[str, Any]], check_duplicates: bool = False
-    ) -> list[str]:
+    ) -> list[str | None]:
         """Add multiple entries with batch embedding (~275x faster than per-entry add).
 
         Args:
@@ -462,17 +491,17 @@ class KnowledgeDB:
             check_duplicates: If True, check each entry for duplicates (slower)
 
         Returns:
-            List of entry IDs
+            List of entry IDs aligned to input entries. Rejected entries return None.
         """
         if not entries:
             return []
 
         # Validate and prepare entries
         valid_entries = []
-        for entry in entries:
-            if not entry.get("title") or (
-                "insight" not in entry and "summary" not in entry
-            ):
+        accepted_indexes = []
+        result_ids: list[str | None] = [None] * len(entries)
+        for idx, entry in enumerate(entries):
+            if not entry.get("title") or ("insight" not in entry and "summary" not in entry):
                 continue
 
             title = entry.get("title", "").strip()
@@ -495,9 +524,10 @@ class KnowledgeDB:
             entry.setdefault("pinned", False)
 
             valid_entries.append(entry)
+            accepted_indexes.append(idx)
 
         if not valid_entries:
-            return []
+            return result_ids
 
         # Batch embed all texts at once
         texts = [self._build_searchable_text(e) for e in valid_entries]
@@ -510,7 +540,6 @@ class KnowledgeDB:
             self._embeddings = np.vstack([self._embeddings, new_embeddings])
 
         # Update index
-        ids = []
         base_row = len(self._id_to_row)
         for i, entry in enumerate(valid_entries):
             row_idx = base_row + i
@@ -518,7 +547,7 @@ class KnowledgeDB:
             self._id_to_row[entry_id] = row_idx
             self._row_to_id[row_idx] = entry_id
             self._entries.append(entry)
-            ids.append(entry_id)
+            result_ids[accepted_indexes[i]] = entry_id
 
         # Batch sparse embeddings
         if self.sparse_model is not None:
@@ -543,7 +572,7 @@ class KnowledgeDB:
 
         self._save_index()
 
-        return ids
+        return result_ids
 
     def remove_entries(self, entry_ids: list[str]) -> int:
         """Remove entries and rebuild in-memory state.
@@ -554,28 +583,27 @@ class KnowledgeDB:
             return 0
 
         id_set = set(entry_ids)
-        removed = 0
-
-        for eid in id_set:
-            if eid in self._id_to_row:
-                row_idx = self._id_to_row[eid]
-                if self._embeddings is not None and row_idx < len(self._embeddings):
-                    self._embeddings[row_idx] = 0.0
-                if row_idx in self._sparse_vectors:
-                    del self._sparse_vectors[row_idx]
-                removed += 1
+        rows_to_remove = sorted(self._id_to_row[eid] for eid in id_set if eid in self._id_to_row)
+        removed = len(rows_to_remove)
 
         if removed > 0:
-            # Clean in-memory state so get()/add() stay consistent
-            for eid in id_set:
-                row_idx = self._id_to_row.pop(eid, None)
-                if row_idx is not None:
-                    self._row_to_id.pop(row_idx, None)
-            self._entries = [
-                e for e in self._entries if e.get("id") not in id_set
-            ]
-            self._rebuild_inverted_index()
+            rows_to_remove = set(rows_to_remove)
+            keep_rows = [idx for idx in range(len(self._entries)) if idx not in rows_to_remove]
 
+            self._entries = [self._entries[idx] for idx in keep_rows]
+            self._id_to_row = {entry["id"]: idx for idx, entry in enumerate(self._entries)}
+            self._row_to_id = {idx: entry["id"] for idx, entry in enumerate(self._entries)}
+
+            if self._embeddings is not None:
+                self._embeddings = self._embeddings[keep_rows]
+
+            sparse_by_old_row = self._sparse_vectors
+            self._sparse_vectors = {
+                new_idx: sparse_by_old_row[old_idx]
+                for new_idx, old_idx in enumerate(keep_rows)
+                if old_idx in sparse_by_old_row
+            }
+            self._rebuild_inverted_index()
             self._save_index()
 
             # Rewrite JSONL without removed entries
@@ -724,9 +752,7 @@ class KnowledgeDB:
 
         last_updated = None
         if self.embeddings_path.exists():
-            last_updated = datetime.fromtimestamp(
-                self.embeddings_path.stat().st_mtime
-            ).isoformat()
+            last_updated = datetime.fromtimestamp(self.embeddings_path.stat().st_mtime).isoformat()
 
         return {
             "count": count,
@@ -798,6 +824,7 @@ class KnowledgeDB:
 
         if self.old_txtai_path.exists():
             import shutil
+
             shutil.rmtree(self.old_txtai_path)
 
         debug_log(f"Rebuilt index with {len(entries)} entries")
@@ -806,7 +833,8 @@ class KnowledgeDB:
     def list_recent(self, limit: int = 10) -> list[dict[str, Any]]:
         """List most recent entries (from in-memory index)."""
         entries = [
-            e.copy() for e in self._entries
+            e.copy()
+            for e in self._entries
             if e.get("title") != "?"  # Skip orphaned stubs
         ]
         entries.sort(
@@ -878,9 +906,17 @@ class KnowledgeDB:
             return []
 
         type_weights = {
-            "warning": 3.0, "solution": 2.5, "decision": 2.0, "pattern": 2.0,
-            "finding": 1.5, "discovery": 1.5, "lesson": 1.5, "best-practice": 1.5,
-            "commit": 0.5, "journal": 0.0, "session": 0.0,
+            "warning": 3.0,
+            "solution": 2.5,
+            "decision": 2.0,
+            "pattern": 2.0,
+            "finding": 1.5,
+            "discovery": 1.5,
+            "lesson": 1.5,
+            "best-practice": 1.5,
+            "commit": 0.5,
+            "journal": 0.0,
+            "session": 0.0,
         }
         priority_scores = {"critical": 100, "high": 50, "medium": 20, "low": 10}
 
@@ -918,15 +954,17 @@ class KnowledgeDB:
 
         results = []
         for _, entry in scored[:limit]:
-            results.append({
-                "id": entry.get("id"),
-                "title": entry.get("title", ""),
-                "insight": entry.get("insight", entry.get("summary", ""))[:200],
-                "type": entry.get("type", "finding"),
-                "priority": entry.get("priority", "medium"),
-                "keywords": entry.get("keywords", entry.get("tags", []))[:5],
-                "pinned": entry.get("pinned", False),
-            })
+            results.append(
+                {
+                    "id": entry.get("id"),
+                    "title": entry.get("title", ""),
+                    "insight": entry.get("insight", entry.get("summary", ""))[:200],
+                    "type": entry.get("type", "finding"),
+                    "priority": entry.get("priority", "medium"),
+                    "keywords": entry.get("keywords", entry.get("tags", []))[:5],
+                    "pinned": entry.get("pinned", False),
+                }
+            )
 
         return results
 
@@ -1012,6 +1050,7 @@ class KnowledgeDB:
         if rewrite and migrated_count > 0:
             backup_path = self.jsonl_path.with_suffix(".jsonl.bak")
             import shutil
+
             shutil.copy(self.jsonl_path, backup_path)
 
             self._write_jsonl(entries)

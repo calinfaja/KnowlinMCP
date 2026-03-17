@@ -55,8 +55,13 @@ class TestFormatCompact:
 
     def test_truncates_long_insight(self):
         results = [
-            {"title": "Test", "type": "finding", "insight": "x" * 200,
-             "date": "2026-01-01", "id": "t1"},
+            {
+                "title": "Test",
+                "type": "finding",
+                "insight": "x" * 200,
+                "date": "2026-01-01",
+                "id": "t1",
+            },
         ]
         output = format_compact(results)
         assert "..." in output
@@ -66,8 +71,14 @@ class TestFormatCompact:
 
     def test_includes_source_label(self):
         results = [
-            {"title": "Test", "type": "finding", "_source": "kb",
-             "date": "2026-01-01", "id": "t1", "score": 0.5},
+            {
+                "title": "Test",
+                "type": "finding",
+                "_source": "kb",
+                "date": "2026-01-01",
+                "id": "t1",
+                "score": 0.5,
+            },
         ]
         output = format_compact(results)
         assert "kb:finding" in output
@@ -96,8 +107,14 @@ class TestFormatDetailed:
 
     def test_includes_source_label(self):
         results = [
-            {"title": "Test", "type": "finding", "_source": "docs",
-             "date": "2026-01-01", "id": "t1", "score": 0.7},
+            {
+                "title": "Test",
+                "type": "finding",
+                "_source": "docs",
+                "date": "2026-01-01",
+                "id": "t1",
+                "score": 0.7,
+            },
         ]
         output = format_detailed(results)
         assert "[docs]" in output

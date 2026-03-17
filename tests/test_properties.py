@@ -51,7 +51,8 @@ class TestSearchDeterminism:
 
     @given(query=_query_strategy)
     @settings(
-        max_examples=10, deadline=None,
+        max_examples=10,
+        deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
     def test_deterministic_results(self, prop_db, query):
@@ -67,7 +68,8 @@ class TestScoreOrdering:
 
     @given(query=_query_strategy)
     @settings(
-        max_examples=10, deadline=None,
+        max_examples=10,
+        deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
     def test_scores_descending(self, prop_db, query):
@@ -87,7 +89,8 @@ class TestLimitMonotonicity:
         k_large=st.integers(min_value=3, max_value=5),
     )
     @settings(
-        max_examples=10, deadline=None,
+        max_examples=10,
+        deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
     def test_larger_k_returns_more(self, prop_db, query, k_small, k_large):

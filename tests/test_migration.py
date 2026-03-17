@@ -17,19 +17,23 @@ class TestMigrateInsight:
         assert entry["insight"] == "Atomic text"
 
     def test_both_merged_when_different(self):
-        entry = migrate_entry({
-            "title": "Test",
-            "atomic_insight": "Atomic",
-            "summary": "Summary text",
-        })
+        entry = migrate_entry(
+            {
+                "title": "Test",
+                "atomic_insight": "Atomic",
+                "summary": "Summary text",
+            }
+        )
         assert entry["insight"] == "Atomic Summary text"
 
     def test_both_deduped_when_atomic_in_summary(self):
-        entry = migrate_entry({
-            "title": "Test",
-            "atomic_insight": "Key insight",
-            "summary": "Key insight with more detail",
-        })
+        entry = migrate_entry(
+            {
+                "title": "Test",
+                "atomic_insight": "Key insight",
+                "summary": "Key insight with more detail",
+            }
+        )
         assert entry["insight"] == "Key insight with more detail"
 
     def test_falls_back_to_title_when_empty(self):
@@ -37,11 +41,13 @@ class TestMigrateInsight:
         assert entry["insight"] == "My Title"
 
     def test_existing_insight_not_overwritten(self):
-        entry = migrate_entry({
-            "title": "Test",
-            "insight": "Already V3",
-            "summary": "Old V2",
-        })
+        entry = migrate_entry(
+            {
+                "title": "Test",
+                "insight": "Already V3",
+                "summary": "Old V2",
+            }
+        )
         assert entry["insight"] == "Already V3"
 
 
@@ -57,11 +63,13 @@ class TestMigrateKeywords:
         assert entry["keywords"] == ["x", "y"]
 
     def test_merged_and_deduped(self):
-        entry = migrate_entry({
-            "title": "Test",
-            "tags": ["auth", "jwt"],
-            "key_concepts": ["JWT", "security"],
-        })
+        entry = migrate_entry(
+            {
+                "title": "Test",
+                "tags": ["auth", "jwt"],
+                "key_concepts": ["JWT", "security"],
+            }
+        )
         kw = entry["keywords"]
         assert "auth" in kw
         assert "security" in kw
@@ -70,11 +78,13 @@ class TestMigrateKeywords:
         assert jwt_count == 1
 
     def test_existing_keywords_not_overwritten(self):
-        entry = migrate_entry({
-            "title": "Test",
-            "keywords": ["existing"],
-            "tags": ["ignored"],
-        })
+        entry = migrate_entry(
+            {
+                "title": "Test",
+                "keywords": ["existing"],
+                "tags": ["ignored"],
+            }
+        )
         assert entry["keywords"] == ["existing"]
 
     def test_empty_tags_gives_empty_keywords(self):
@@ -138,11 +148,13 @@ class TestMigrateDate:
         assert entry["date"] == ""
 
     def test_existing_date_not_overwritten(self):
-        entry = migrate_entry({
-            "title": "Test",
-            "date": "2025-01-01",
-            "found_date": "2024-12-01",
-        })
+        entry = migrate_entry(
+            {
+                "title": "Test",
+                "date": "2025-01-01",
+                "found_date": "2024-12-01",
+            }
+        )
         assert entry["date"] == "2025-01-01"
 
 
@@ -178,11 +190,13 @@ class TestMigratePriority:
         assert entry["priority"] == "low"
 
     def test_existing_priority_not_overwritten(self):
-        entry = migrate_entry({
-            "title": "Test",
-            "priority": "critical",
-            "quality": "low",
-        })
+        entry = migrate_entry(
+            {
+                "title": "Test",
+                "priority": "critical",
+                "quality": "low",
+            }
+        )
         assert entry["priority"] == "critical"
 
 
@@ -252,5 +266,10 @@ class TestMigrateDefaults:
         assert "related_to" in entry
         assert isinstance(entry["related_to"], list)
         assert entry["type"] in (
-            "finding", "solution", "pattern", "warning", "decision", "discovery",
+            "finding",
+            "solution",
+            "pattern",
+            "warning",
+            "decision",
+            "discovery",
         )

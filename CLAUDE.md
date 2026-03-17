@@ -11,7 +11,11 @@ KnowlinMCP -- hybrid semantic knowledge database with MCP server and multi-sourc
 All tools are in the `.venv`. Use `.venv/bin/` prefix or activate the venv first.
 
 ```bash
-# Install for development
+# Quick setup (creates .venv, installs deps + MCP support)
+./install.sh
+./install.sh --with-pdf   # also install PDF ingestion
+
+# Install for development (manual)
 .venv/bin/pip install -e ".[dev,mcp]"
 
 # Run all unit tests
@@ -119,7 +123,7 @@ Per-project daemon on port 14000+. Keeps models and embeddings in RAM for ~30ms 
 
 ### MCP server
 
-FastMCP server exposing 4 tools via stdio transport: `knowlin_search`, `knowlin_get`, `knowlin_stats`, `knowlin_ingest`. Compatible with Claude, Gemini, Codex, Cursor, VS Code, and other MCP clients. Installed as optional dep (`pip install "knowlin-mcp[mcp]"`).
+FastMCP server exposing 5 tools via stdio transport: `knowlin_search`, `knowlin_get`, `knowlin_capture`, `knowlin_stats`, `knowlin_ingest`. Compatible with Claude, Gemini, Codex, Cursor, VS Code, and other MCP clients. Installed as optional dep (`pip install "knowlin-mcp[mcp]"`).
 
 ## Key conventions
 
@@ -130,5 +134,7 @@ FastMCP server exposing 4 tools via stdio transport: `knowlin_search`, `knowlin_
 - **Entry schema V3** with backward-compatible V2 migration (summary->insight, tags->keywords, found_date->date). Migration happens transparently in `utils.py`.
 - **Entry types**: finding, solution, pattern, warning, decision, discovery.
 - **Dedup threshold**: 0.92 cosine similarity on add.
-- **Test fixtures**: `temp_kb_dir`, `sample_entries`, `kb_with_entries`, `project_root` in `conftest.py`. Tests use `tmp_path` to avoid touching real data.
+- **Test fixtures**: `temp_kb_dir`, `sample_entries`, `kb_with_entries`, `project_root` in `conftest.py`. Tests use `tmp_path` to avoid touching real data. Note: `sample_entries` uses V2 field names (`summary`, `tags`, `found_date`) which get migrated transparently.
 - **Markers**: `@pytest.mark.integration` (skipped without `--integration`), `@pytest.mark.benchmark`.
+- **Source config**: `.knowledge-db/sources.yaml` controls which dirs to ingest. Without it, auto-discovers `docs/`, `doc/`, `INFOS/` and Claude sessions from `~/.claude/projects/`.
+- **Environment variables**: `CLAUDE_PROJECT_DIR` overrides project root detection; `KNOWLIN_DEBUG` enables debug logging to stderr.

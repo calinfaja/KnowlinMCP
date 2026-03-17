@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 import click
+import psutil
 from rich.console import Console
 from rich.table import Table
 
@@ -24,7 +25,7 @@ from knowlin_mcp.platform import (
     read_pid_file,
 )
 from knowlin_mcp.search import FORMATTERS, format_single_entry
-from knowlin_mcp.utils import is_server_running
+from knowlin_mcp.utils import debug_log, is_server_running
 
 console = Console()
 
@@ -55,7 +56,9 @@ def main():
 @click.argument("query", required=False, default="")
 @click.option("--source", "-s", multiple=True, help="Sources to search (kb, sessions, docs)")
 @click.option(
-    "--format", "-f", "fmt",
+    "--format",
+    "-f",
+    "fmt",
     type=click.Choice(["compact", "detailed", "inject", "json"]),
     default="compact",
 )
@@ -63,10 +66,19 @@ def main():
 @click.option("--since", help="Entries from this date (YYYY-MM-DD)")
 @click.option("--until", "until_date", help="Entries up to this date (YYYY-MM-DD)")
 @click.option(
-    "--type", "entry_type",
+    "--type",
+    "entry_type",
     type=click.Choice(
-        ["finding", "solution", "pattern", "warning", "decision", "discovery",
-         "document", "session"],
+        [
+            "finding",
+            "solution",
+            "pattern",
+            "warning",
+            "decision",
+            "discovery",
+            "document",
+            "session",
+        ],
         case_sensitive=False,
     ),
     help="Filter by entry type",
@@ -76,8 +88,17 @@ def main():
 @click.option("--id", "entry_id", help="Get specific entry by ID")
 @click.option("--project", "-p", help="Project path")
 def search(
-    query, source, fmt, limit, since, until_date,
-    entry_type, branch, min_score, entry_id, project,
+    query,
+    source,
+    fmt,
+    limit,
+    since,
+    until_date,
+    entry_type,
+    branch,
+    min_score,
+    entry_id,
+    project,
 ):
     """Search the knowledge database."""
     root = _resolve_project(project)
@@ -87,6 +108,7 @@ def search(
     # Detail retrieval mode (single entry by ID)
     if entry_id:
         from knowlin_mcp.db import KnowledgeDB
+
         try:
             db = KnowledgeDB(str(root))
         except Exception as e:
@@ -120,6 +142,7 @@ def search(
 
     # Use MultiSourceSearch for unified weighted RRF search
     from knowlin_mcp.multi_search import MultiSourceSearch
+
     ms = MultiSourceSearch(str(root))
 
     all_results = ms.search(
@@ -148,10 +171,9 @@ def search(
 @main.command()
 @click.argument("content", required=False, default="")
 @click.option(
-    "--type", "entry_type",
-    type=click.Choice(
-        ["finding", "solution", "pattern", "warning", "decision", "discovery"]
-    ),
+    "--type",
+    "entry_type",
+    type=click.Choice(["finding", "solution", "pattern", "warning", "decision", "discovery"]),
     default="finding",
 )
 @click.option("--tags", default="", help="Comma-separated keywords")
@@ -200,7 +222,14 @@ def capture(content, entry_type, tags, priority, url, json_input, json_output, p
             url=url if url else None,
         )
 
-    save_entry(entry, knowledge_dir)
+    saved = save_entry(entry, knowledge_dir)
+    if not saved:
+        if json_output:
+            click.echo(json.dumps({"error": "Failed to save entry"}))
+        else:
+            console.print("[red]Failed to save entry[/red]")
+        raise SystemExit(1)
+
     log_to_timeline(
         entry.get("insight", content[:60]),
         entry.get("type", entry_type),
@@ -208,12 +237,16 @@ def capture(content, entry_type, tags, priority, url, json_input, json_output, p
     )
 
     if json_output:
-        click.echo(json.dumps({
-            "status": "success",
-            "id": entry["id"],
-            "title": entry["title"],
-            "type": entry.get("type", entry_type),
-        }))
+        click.echo(
+            json.dumps(
+                {
+                    "status": "success",
+                    "id": entry["id"],
+                    "title": entry["title"],
+                    "type": entry.get("type", entry_type),
+                }
+            )
+        )
     else:
         display = entry.get("title", "")[:60]
         console.print(f"[green]Captured {entry.get('type', entry_type)}: {display}[/green]")
@@ -244,6 +277,7 @@ def server_start(project):
 
     # Start inline (foreground)
     from knowlin_mcp.server import KnowledgeServer
+
     srv = KnowledgeServer(str(root))
     srv.start()
 
@@ -259,6 +293,21 @@ def server_stop(project):
     pid = read_pid_file(pid_file)
 
     if pid and is_process_running(pid):
+        try:
+            proc = psutil.Process(pid)
+            cmdline = " ".join(proc.cmdline())
+            if "knowlin" not in cmdline.lower():
+                debug_log(f"PID {pid} is not a knowlin process: {cmdline}")
+                pid_file.unlink(missing_ok=True)
+                port_file.unlink(missing_ok=True)
+                console.print(f"No server running for {root}")
+                return
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pid_file.unlink(missing_ok=True)
+            port_file.unlink(missing_ok=True)
+            console.print(f"No server running for {root}")
+            return
+
         kill_process_tree(pid)
         console.print(f"Stopped server for {root} (PID {pid})")
         pid_file.unlink(missing_ok=True)
@@ -366,7 +415,9 @@ def stats(json_output, project):
 @main.command()
 @click.option("--source", "-s", multiple=True, help="Sources to export (kb, sessions, docs)")
 @click.option(
-    "--format", "-f", "fmt",
+    "--format",
+    "-f",
+    "fmt",
     type=click.Choice(["jsonl", "json"]),
     default="jsonl",
     help="Output format",
@@ -378,9 +429,9 @@ def export(source, fmt, output, project):
     from knowlin_mcp.db import KnowledgeDB
 
     root = _resolve_project(project)
-    sub_stores = [
-        (s if s != "kb" else None) for s in source
-    ] if source else [None, "sessions", "docs"]
+    sub_stores = (
+        [(s if s != "kb" else None) for s in source] if source else [None, "sessions", "docs"]
+    )
 
     entries = []
     for sub in sub_stores:
@@ -416,7 +467,10 @@ def list_entries(limit, source, project):
     from knowlin_mcp.db import KnowledgeDB
 
     root = _resolve_project(project)
-    sources = list(source) if source else [None, "sessions", "docs"]
+    if source:
+        sources = [None if sub == "kb" else sub for sub in source]
+    else:
+        sources = [None, "sessions", "docs"]
 
     entries = []
     for sub in sources:
@@ -505,7 +559,7 @@ def delete(entry_id, source, project):
     root = _resolve_project(project)
 
     # If source specified, only look there
-    stores = [source] if source else [None, "sessions", "docs"]
+    stores = [None if source == "kb" else source] if source else [None, "sessions", "docs"]
 
     for sub in stores:
         try:
@@ -591,6 +645,7 @@ def doctor(fix, project):
 
     # 2. Check each store
     import numpy as np
+
     for store_name, sub_store in [("kb", None), ("sessions", "sessions"), ("docs", "docs")]:
         store_path = db_path / sub_store if sub_store else db_path
         jsonl = store_path / "entries.jsonl"
@@ -615,6 +670,7 @@ def doctor(fix, project):
             warn(f"{store_name}: entries.jsonl ({jsonl_count}) but no embeddings.npy")
             if fix:
                 from knowlin_mcp.db import KnowledgeDB
+
                 console.print(f"    [cyan]Rebuilding {store_name} index...[/cyan]")
                 db = KnowledgeDB(str(root), sub_store=sub_store)
                 db.rebuild_index()
@@ -642,6 +698,7 @@ def doctor(fix, project):
                 warn(f"{store_name}: {orphaned} orphaned embeddings (run rebuild to compact)")
                 if fix:
                     from knowlin_mcp.db import KnowledgeDB
+
                     console.print(f"    [cyan]Compacting {store_name}...[/cyan]")
                     db = KnowledgeDB(str(root), sub_store=sub_store)
                     db.rebuild_index()
@@ -655,6 +712,7 @@ def doctor(fix, project):
             )
             if fix:
                 from knowlin_mcp.db import KnowledgeDB
+
                 console.print(f"    [cyan]Rebuilding {store_name}...[/cyan]")
                 db = KnowledgeDB(str(root), sub_store=sub_store)
                 db.rebuild_index()
@@ -680,6 +738,7 @@ def doctor(fix, project):
     if sources_path.exists():
         try:
             import yaml
+
             config = yaml.safe_load(sources_path.read_text())
             if config:
                 ok(f"sources.yaml: valid ({len(config)} sections)")
@@ -849,6 +908,7 @@ def sources(do_init, project):
 
         # Show what convention-based discovery finds
         from knowlin_mcp.ingest_docs import DocsIngester
+
         ingester = DocsIngester.__new__(DocsIngester)
         ingester.project_path = root
         ingester._sources_config = None
@@ -861,8 +921,7 @@ def sources(do_init, project):
                 console.print(f"  {d}")
         else:
             console.print(
-                "\n[dim]No doc directories found"
-                " (docs/, doc/, INFOS/, documentation/)[/dim]"
+                "\n[dim]No doc directories found (docs/, doc/, INFOS/, documentation/)[/dim]"
             )
 
 
@@ -929,7 +988,7 @@ def init(mcp, path):
     console.print("Next steps:")
     console.print("  1. Edit .knowledge-db/sources.yaml to add your doc paths")
     console.print("  2. Run [bold]knowlin ingest all[/bold] to index your docs")
-    console.print("  3. Run [bold]knowlin search \"your query\"[/bold] to search")
+    console.print('  3. Run [bold]knowlin search "your query"[/bold] to search')
 
 
 if __name__ == "__main__":

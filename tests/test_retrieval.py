@@ -135,8 +135,7 @@ class TestGoldenRetrieval:
         results = golden_db.search(case["query"], limit=3, rerank=False)
         titles = [r["title"] for r in results]
         assert case["expected_title"] in titles, (
-            f"Query '{case['query']}' expected '{case['expected_title']}' "
-            f"in top 3, got: {titles}"
+            f"Query '{case['query']}' expected '{case['expected_title']}' in top 3, got: {titles}"
         )
 
     def test_aggregate_hit_at_1(self, golden_db):

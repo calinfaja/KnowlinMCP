@@ -11,28 +11,68 @@ from enum import Enum
 
 class QueryIntent(Enum):
     """Classification of search query intent."""
-    DEBUG = "debug"       # Error/bug investigation
-    HOWTO = "howto"       # How to accomplish something
-    RECALL = "recall"     # Recall a specific past event/decision
-    EXPLORE = "explore"   # Open-ended exploration
+
+    DEBUG = "debug"  # Error/bug investigation
+    HOWTO = "howto"  # How to accomplish something
+    RECALL = "recall"  # Recall a specific past event/decision
+    EXPLORE = "explore"  # Open-ended exploration
 
 
 # Signal words for each intent
 _INTENT_SIGNALS = {
     QueryIntent.DEBUG: [
-        "error", "bug", "crash", "fail", "broken", "exception", "traceback",
-        "stack trace", "segfault", "panic", "undefined", "null", "nan",
-        "timeout", "hang", "freeze", "memory leak", "race condition",
+        "error",
+        "bug",
+        "crash",
+        "fail",
+        "broken",
+        "exception",
+        "traceback",
+        "stack trace",
+        "segfault",
+        "panic",
+        "undefined",
+        "null",
+        "nan",
+        "timeout",
+        "hang",
+        "freeze",
+        "memory leak",
+        "race condition",
     ],
     QueryIntent.HOWTO: [
-        "how to", "how do", "how can", "what's the best way", "implement",
-        "configure", "setup", "set up", "install", "create", "build",
-        "make", "add", "enable", "disable", "use ", "connect",
+        "how to",
+        "how do",
+        "how can",
+        "what's the best way",
+        "implement",
+        "configure",
+        "setup",
+        "set up",
+        "install",
+        "create",
+        "build",
+        "make",
+        "add",
+        "enable",
+        "disable",
+        "use ",
+        "connect",
     ],
     QueryIntent.RECALL: [
-        "when did", "where did", "who", "last time", "previously",
-        "remember", "that time", "we decided", "we chose", "decision",
-        "why did we", "what was the", "history",
+        "when did",
+        "where did",
+        "who",
+        "last time",
+        "previously",
+        "remember",
+        "that time",
+        "we decided",
+        "we chose",
+        "decision",
+        "why did we",
+        "what was the",
+        "history",
     ],
 }
 

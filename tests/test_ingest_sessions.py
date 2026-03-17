@@ -70,18 +70,20 @@ def sample_jsonl(session_dir):
     path = session_dir / "test-session.jsonl"
     records = [
         _user_record("How do I fix the authentication bug?"),
-        _assistant_record([
-            {
-                "type": "text",
-                "text": (
-                    "The root cause of the authentication issue was that the JWT token "
-                    "validation was checking the wrong issuer field. The fix is to update "
-                    "the issuer config in auth.py. I found that the token was being validated "
-                    "against 'old-issuer' instead of 'new-issuer'. This is a common gotcha "
-                    "when migrating authentication providers."
-                ),
-            }
-        ]),
+        _assistant_record(
+            [
+                {
+                    "type": "text",
+                    "text": (
+                        "The root cause of the authentication issue was that the JWT token "
+                        "validation was checking the wrong issuer field. The fix is to update "
+                        "the issuer config in auth.py. I found that the token was being validated "
+                        "against 'old-issuer' instead of 'new-issuer'. This is a common gotcha "
+                        "when migrating authentication providers."
+                    ),
+                }
+            ]
+        ),
         _user_record("Thanks"),
         _assistant_record("You're welcome!"),
     ]
@@ -129,8 +131,10 @@ class TestScoreContent:
         ingester._registry = {}
 
         skip_texts = [
-            "I'll check that for you", "Let me look at the code",
-            "Sure, I can do that", "Done.",
+            "I'll check that for you",
+            "Let me look at the code",
+            "Sure, I can do that",
+            "Done.",
         ]
         for text in skip_texts:
             score, _ = ingester._score_content(text)
@@ -205,12 +209,12 @@ class TestIsRealUserMessage:
 
     def test_command_name_filtered(self):
         ingester = SessionIngester.__new__(SessionIngester)
-        text = '<command-name>/compact</command-name><command-message>compact</command-message>'
+        text = "<command-name>/compact</command-name><command-message>compact</command-message>"
         assert ingester._is_real_user_message(text) == ""
 
     def test_system_reminder_filtered(self):
         ingester = SessionIngester.__new__(SessionIngester)
-        text = '<system-reminder>Some system context here</system-reminder>'
+        text = "<system-reminder>Some system context here</system-reminder>"
         assert ingester._is_real_user_message(text) == ""
 
     def test_continuation_summary_filtered(self):
@@ -249,12 +253,19 @@ class TestExtractFromJsonl:
         path = session_dir / "type-dispatch.jsonl"
         records = [
             _user_record("What is the cause of this error?"),
-            _assistant_record([{
-                "type": "text",
-                "text": "The root cause was a missing configuration value. The fix is to add "
-                        "the DATABASE_URL environment variable. I discovered that the default "
-                        "fallback was removed in the latest migration.",
-            }]),
+            _assistant_record(
+                [
+                    {
+                        "type": "text",
+                        "text": (
+                            "The root cause was a missing configuration value. "
+                            "The fix is to add the DATABASE_URL environment variable. "
+                            "I discovered that the default fallback was removed in the latest "
+                            "migration."
+                        ),
+                    }
+                ]
+            ),
         ]
         with open(path, "w") as f:
             for r in records:
@@ -290,12 +301,16 @@ class TestExtractFromJsonl:
             _user_record("What is the fix for the auth bug?"),
             _assistant_record([{"type": "tool_use", "name": "Read", "input": {"file": "auth.py"}}]),
             _tool_result_user("t1"),  # Should NOT overwrite last_user_text
-            _assistant_record([{
-                "type": "text",
-                "text": "The root cause of the auth bug was that the JWT token validation "
+            _assistant_record(
+                [
+                    {
+                        "type": "text",
+                        "text": "The root cause of the auth bug was that the JWT token validation "
                         "was checking the wrong issuer field. I found that the token was being "
                         "validated against the old provider instead of the new one.",
-            }]),
+                    }
+                ]
+            ),
         ]
         with open(path, "w") as f:
             for r in records:
@@ -314,12 +329,16 @@ class TestExtractFromJsonl:
         path = session_dir / "queue.jsonl"
         records = [
             _queue_enqueue("How do I configure the database connection pool?"),
-            _assistant_record([{
-                "type": "text",
-                "text": "The root cause of slow queries was the connection pool size. "
+            _assistant_record(
+                [
+                    {
+                        "type": "text",
+                        "text": "The root cause of slow queries was the connection pool size. "
                         "The fix is to increase max_connections in the pool config. "
                         "I found that the default of 5 was too low for production load.",
-            }]),
+                    }
+                ]
+            ),
         ]
         with open(path, "w") as f:
             for r in records:
@@ -351,16 +370,18 @@ class TestExtractFromJsonl:
     def test_handles_content_blocks(self, session_dir):
         path = session_dir / "blocks.jsonl"
         records = [
-            _assistant_record([
-                {"type": "text", "text": "The root cause of the problem was "},
-                {
-                    "type": "text",
-                    "text": (
-                        "an incorrect configuration. The fix resolved the issue because "
-                        "it updated the correct field. I discovered the old value was stale."
-                    ),
-                },
-            ]),
+            _assistant_record(
+                [
+                    {"type": "text", "text": "The root cause of the problem was "},
+                    {
+                        "type": "text",
+                        "text": (
+                            "an incorrect configuration. The fix resolved the issue because "
+                            "it updated the correct field. I discovered the old value was stale."
+                        ),
+                    },
+                ]
+            ),
         ]
         with open(path, "w") as f:
             for r in records:
@@ -403,11 +424,18 @@ class TestExtractFromJsonl:
         """Entry type should be inferred from value signals, not always 'session'."""
         path = session_dir / "typed.jsonl"
         records = [
-            _assistant_record([{
-                "type": "text",
-                "text": "The root cause was a race condition. The fix is to add a mutex lock "
-                        "around the critical section. This resolved the intermittent failures.",
-            }]),
+            _assistant_record(
+                [
+                    {
+                        "type": "text",
+                        "text": (
+                            "The root cause was a race condition. "
+                            "The fix is to add a mutex lock around the critical section. "
+                            "This resolved the intermittent failures."
+                        ),
+                    }
+                ]
+            ),
         ]
         with open(path, "w") as f:
             for r in records:
@@ -533,13 +561,17 @@ class TestIngest:
         path = subdir / "sub-session.jsonl"
         records = [
             _user_record("Analyze this codebase"),
-            _assistant_record([{
-                "type": "text",
-                "text": "I found that the codebase uses a layered architecture. "
+            _assistant_record(
+                [
+                    {
+                        "type": "text",
+                        "text": "I found that the codebase uses a layered architecture. "
                         "The root cause of the complexity was the tight coupling between "
                         "the service and repository layers. The fix would be to introduce "
                         "proper dependency injection.",
-            }]),
+                    }
+                ]
+            ),
         ]
         with open(path, "w") as f:
             for r in records:
@@ -627,12 +659,21 @@ class TestCleanup:
 
         # Append a new substantive record
         with open(sample_jsonl, "a") as f:
-            f.write(json.dumps(_assistant_record([{
-                "type": "text",
-                "text": "The root cause of the problem was a configuration error. "
-                        "The fix resolved the timeout issue completely. I discovered "
-                        "this by checking the connection pool settings.",
-            }])) + "\n")
+            f.write(
+                json.dumps(
+                    _assistant_record(
+                        [
+                            {
+                                "type": "text",
+                                "text": "The root cause of the problem was a configuration error. "
+                                "The fix resolved the timeout issue completely. I discovered "
+                                "this by checking the connection pool settings.",
+                            }
+                        ]
+                    )
+                )
+                + "\n"
+            )
 
         mock_db.batch_add.return_value = ["id2", "id3"]
 

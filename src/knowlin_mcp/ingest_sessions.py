@@ -33,24 +33,52 @@ SUBSTANTIVE_LENGTH = 300
 # Signals that indicate high-value content in assistant messages
 _VALUE_SIGNALS = {
     "decision": [
-        "decided to", "chose", "went with", "instead of", "trade-off",
-        "the reason", "because", "approach is",
+        "decided to",
+        "chose",
+        "went with",
+        "instead of",
+        "trade-off",
+        "the reason",
+        "because",
+        "approach is",
     ],
     "solution": [
-        "the fix", "fixed by", "resolved", "workaround", "solution is",
-        "to fix this", "the issue was", "root cause",
+        "the fix",
+        "fixed by",
+        "resolved",
+        "workaround",
+        "solution is",
+        "to fix this",
+        "the issue was",
+        "root cause",
     ],
     "warning": [
-        "be careful", "watch out", "gotcha", "caveat", "don't forget",
-        "important:", "note:", "warning:",
+        "be careful",
+        "watch out",
+        "gotcha",
+        "caveat",
+        "don't forget",
+        "important:",
+        "note:",
+        "warning:",
     ],
     "pattern": [
-        "best practice", "pattern", "convention", "recommended",
-        "the approach", "typically", "standard way",
+        "best practice",
+        "pattern",
+        "convention",
+        "recommended",
+        "the approach",
+        "typically",
+        "standard way",
     ],
     "discovery": [
-        "found that", "turns out", "discovered", "realized",
-        "interesting", "unexpected", "TIL",
+        "found that",
+        "turns out",
+        "discovered",
+        "realized",
+        "interesting",
+        "unexpected",
+        "TIL",
     ],
 }
 
@@ -75,7 +103,6 @@ _USER_NOISE_MARKERS = [
     "## Triggers",  # Slash command definitions injected as user text
     "## When to",
 ]
-
 
 
 def score_content(text: str) -> tuple[float, str]:
@@ -118,6 +145,7 @@ def score_content(text: str) -> tuple[float, str]:
 
     return (min(1.0, best_score), best_type)
 
+
 class SessionIngester:
     """Ingest Claude Code JSONL session transcripts into knowledge DB."""
 
@@ -135,6 +163,7 @@ class SessionIngester:
 
         # Load sources config
         from knowlin_mcp.ingest_docs import _resolve_paths, load_sources_config
+
         sources_config = load_sources_config(self.db_path)
         sessions_config = (sources_config or {}).get("sessions", {})
 
@@ -234,10 +263,7 @@ class SessionIngester:
 
         if isinstance(content, list):
             # If any block is a tool_result, this is a tool return -- not human input
-            if any(
-                isinstance(b, dict) and b.get("type") == "tool_result"
-                for b in content
-            ):
+            if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
                 return ""
             # Extract text blocks only
             parts = []
@@ -337,19 +363,21 @@ class SessionIngester:
 
                     date_str = self._extract_date(path)
 
-                    entries.append({
-                        "title": title,
-                        "insight": insight,
-                        "type": entry_type or "session",
-                        "priority": "high" if score > 0.7 else "medium",
-                        "keywords": [],
-                        "source": f"session:{path.name}",
-                        "date": date_str,
-                        "timestamp": datetime.now().isoformat(),
-                        "branch": "",
-                        "related_to": [],
-                        "_importance_score": score,
-                    })
+                    entries.append(
+                        {
+                            "title": title,
+                            "insight": insight,
+                            "type": entry_type or "session",
+                            "priority": "high" if score > 0.7 else "medium",
+                            "keywords": [],
+                            "source": f"session:{path.name}",
+                            "date": date_str,
+                            "timestamp": datetime.now().isoformat(),
+                            "branch": "",
+                            "related_to": [],
+                            "_importance_score": score,
+                        }
+                    )
 
         except Exception as e:
             debug_log(f"Failed to parse {path}: {e}")
@@ -473,6 +501,7 @@ class SessionIngester:
 
         # Batch add first, then remove old entries (crash-safe ordering)
         ids = db.batch_add(all_entries, check_duplicates=False)
+        accepted_count = sum(1 for entry_id in ids if entry_id is not None)
 
         for path in to_process:
             old_ids = self._registry.get(str(path), {}).get("entry_ids", [])
@@ -480,18 +509,18 @@ class SessionIngester:
                 db.remove_entries(old_ids)
                 debug_log(f"Removed {len(old_ids)} old entries for {path.name}")
 
-        # Guard: batch_add may silently filter entries
-        total_expected = sum(c for _, c in file_entry_counts)
-        if len(ids) != total_expected:
+        rejected_count = sum(1 for entry_id in ids if entry_id is None)
+        if rejected_count:
             debug_log(
-                f"Warning: expected {total_expected} IDs, got {len(ids)}. "
-                "Some entries may have been filtered by DB validation."
+                "Warning: DB validation rejected "
+                f"{rejected_count} session entries during batch_add."
             )
 
         # Distribute IDs back to registry per file
         offset = 0
         for file_key, count in file_entry_counts:
-            file_ids = ids[offset:offset + count] if count > 0 else []
+            raw_file_ids = ids[offset : offset + count] if count > 0 else []
+            file_ids = [entry_id for entry_id in raw_file_ids if entry_id is not None]
             self._registry[file_key] = {
                 "hash": file_hashes.get(file_key) or self._file_hash(Path(file_key)),
                 "processed": datetime.now().isoformat(),
@@ -501,5 +530,5 @@ class SessionIngester:
             offset += count
 
         self._save_registry()
-        debug_log(f"Ingested {len(ids)} entries from {len(to_process)} sessions")
-        return len(ids)
+        debug_log(f"Ingested {accepted_count} entries from {len(to_process)} sessions")
+        return accepted_count

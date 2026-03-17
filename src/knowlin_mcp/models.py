@@ -76,6 +76,11 @@ def get_dense_model() -> TextEmbedding:
     return _dense_model
 
 
+def get_dense_embedding(text: str):
+    """Generate a dense embedding for a single text input."""
+    return list(get_dense_model().embed([text]))[0]
+
+
 def get_sparse_model():
     """Get or create singleton sparse embedding model (SPLADE++)."""
     global _sparse_model, SparseTextEmbedding

@@ -10,11 +10,14 @@ Tests verify:
 from __future__ import annotations
 
 import json
+import os
 import socket
 import threading
 import time
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 # =============================================================================
 # Port File Tests
@@ -167,6 +170,53 @@ class TestTcpCommunication:
             server_thread.join(timeout=3.0)
 
 
+class TestKnowledgeServerAdd:
+    """Tests for KnowledgeServer._cmd_add()."""
+
+    def test_cmd_add_returns_error_when_entry_is_rejected(self, tmp_path):
+        from knowlin_mcp.server import KnowledgeServer
+
+        (tmp_path / ".knowledge-db").mkdir()
+
+        server = KnowledgeServer(str(tmp_path))
+        server.db = MagicMock()
+        server.db.add.return_value = ""
+
+        response = server._cmd_add({"entry": {"title": "Bad entry"}})
+
+        assert "error" in response
+        assert "rejected" in response["error"].lower()
+
+
+class TestKnowledgeServerSearch:
+    """Tests for KnowledgeServer._cmd_search()."""
+
+    def test_cmd_search_uses_multi_source_for_single_source_filter(self, tmp_path):
+        from knowlin_mcp.server import KnowledgeServer
+
+        (tmp_path / ".knowledge-db").mkdir()
+
+        server = KnowledgeServer(str(tmp_path))
+        server.db = MagicMock()
+        server.ms = MagicMock()
+        server.ms.search.return_value = [{"id": "doc-1", "_source": "docs"}]
+
+        response = server._cmd_search({"query": "auth", "sources": ["docs"], "limit": 3})
+
+        server.ms.search.assert_called_once_with(
+            "auth",
+            sources=["docs"],
+            limit=3,
+            date_from=None,
+            date_to=None,
+            entry_type=None,
+            branch=None,
+        )
+        server.db.search.assert_not_called()
+        assert response["multi_source"] is True
+        assert response["results"] == [{"id": "doc-1", "_source": "docs"}]
+
+
 # =============================================================================
 # KB Initialization Tests
 # =============================================================================
@@ -221,9 +271,11 @@ class TestCleanStaleSocket:
         port_file.write_text("59999")
         pid_file.write_text("999999")
 
-        with patch("knowlin_mcp.utils.get_kb_port_file", return_value=port_file), \
-             patch("knowlin_mcp.utils.get_kb_pid_file", return_value=pid_file), \
-             patch("knowlin_mcp.utils.is_server_running", return_value=False):
+        with (
+            patch("knowlin_mcp.utils.get_kb_port_file", return_value=port_file),
+            patch("knowlin_mcp.utils.get_kb_pid_file", return_value=pid_file),
+            patch("knowlin_mcp.utils.is_server_running", return_value=False),
+        ):
             result = clean_stale_socket(project)
             assert result is True
             assert not port_file.exists()
@@ -251,3 +303,36 @@ class TestCrossPlatform:
         from knowlin_mcp.platform import HOST
 
         assert HOST == "127.0.0.1"
+
+
+class TestRuntimeDirSecurity:
+    """Tests for runtime directory security checks."""
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits differ on Windows")
+    def test_runtime_dir_has_700_permissions(self, tmp_path, monkeypatch):
+        from knowlin_mcp import platform
+
+        monkeypatch.setattr(platform.tempfile, "gettempdir", lambda: str(tmp_path))
+        monkeypatch.setattr(platform.getpass, "getuser", lambda: "tester")
+
+        runtime_dir = platform.get_runtime_dir()
+
+        assert runtime_dir == tmp_path / "knowlin-tester"
+        assert runtime_dir.stat().st_mode & 0o777 == 0o700
+
+    @pytest.mark.skipif(not hasattr(os, "getuid"), reason="requires os.getuid")
+    def test_runtime_dir_wrong_owner_raises(self, tmp_path, monkeypatch):
+        from knowlin_mcp import platform
+
+        monkeypatch.setattr(platform.tempfile, "gettempdir", lambda: str(tmp_path))
+        monkeypatch.setattr(platform.getpass, "getuser", lambda: "tester")
+
+        runtime_dir = tmp_path / "knowlin-tester"
+        runtime_dir.mkdir(mode=0o700)
+
+        current_uid = os.getuid()
+        fake_uid = current_uid + 1 if current_uid != 0 else 1
+        monkeypatch.setattr(platform.os, "getuid", lambda: fake_uid)
+
+        with pytest.raises(PermissionError):
+            platform.get_runtime_dir()

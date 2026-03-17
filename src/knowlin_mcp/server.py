@@ -27,6 +27,7 @@ from knowlin_mcp.platform import (
     get_runtime_dir,
     is_process_running,
     write_pid_file,
+    write_runtime_file,
 )
 
 IDLE_TIMEOUT = 3600  # 1 hour
@@ -43,9 +44,7 @@ def find_available_port(start_port: int, max_attempts: int = 100) -> int:
             return port
         except OSError:
             continue
-    raise RuntimeError(
-        f"No available port found in range {start_port}-{start_port + max_attempts}"
-    )
+    raise RuntimeError(f"No available port found in range {start_port}-{start_port + max_attempts}")
 
 
 def read_port_file(project_path: Path) -> int | None:
@@ -62,7 +61,7 @@ def read_port_file(project_path: Path) -> int | None:
 def write_port_file(project_path: Path, port: int) -> None:
     """Write port to project's port file."""
     port_file = get_kb_port_file(project_path)
-    port_file.write_text(str(port))
+    write_runtime_file(port_file, str(port))
 
 
 def list_running_servers() -> list[dict]:
@@ -86,12 +85,14 @@ def list_running_servers() -> list[dict]:
 
             info = send_command_to_port(port, {"cmd": "status"})
             if info and "project" in info:
-                servers.append({
-                    "port": port,
-                    "pid": pid,
-                    "project": info.get("project", "unknown"),
-                    "load_time": info.get("load_time", 0),
-                })
+                servers.append(
+                    {
+                        "port": port,
+                        "pid": pid,
+                        "project": info.get("project", "unknown"),
+                        "load_time": info.get("load_time", 0),
+                    }
+                )
         except (ValueError, OSError):
             pass
 
@@ -104,9 +105,7 @@ class KnowledgeServer:
     def __init__(self, project_path: str | Path | None = None):
         root = find_project_root(Path(project_path) if project_path else None)
         if not root:
-            raise ValueError(
-                f"No .knowledge-db found from {project_path or os.getcwd()}"
-            )
+            raise ValueError(f"No .knowledge-db found from {project_path or os.getcwd()}")
         self.project_root: Path = root
 
         self.port = 0
@@ -176,13 +175,17 @@ class KnowledgeServer:
         sources = request.get("sources")
 
         # Multi-source search
-        if sources and len(sources) > 1:
+        if sources is not None:
             if not self.ms:
                 return {"error": "No index loaded"}
             results = self.ms.search(
-                query, sources=sources, limit=limit,
-                date_from=date_from, date_to=date_to,
-                entry_type=entry_type, branch=branch,
+                query,
+                sources=sources,
+                limit=limit,
+                date_from=date_from,
+                date_to=date_to,
+                entry_type=entry_type,
+                branch=branch,
             )
             return {"results": results, "query": query, "multi_source": True}
 
@@ -191,9 +194,12 @@ class KnowledgeServer:
             return err
         start = time.time()
         results = self.db.search(
-            query, limit,
-            date_from=date_from, date_to=date_to,
-            entry_type=entry_type, branch=branch,
+            query,
+            limit,
+            date_from=date_from,
+            date_to=date_to,
+            entry_type=entry_type,
+            branch=branch,
         )
         return {
             "results": results,
@@ -224,6 +230,8 @@ class KnowledgeServer:
             return err
         try:
             entry_id = self.db.add(entry)
+            if not entry_id:
+                return {"error": "Entry rejected"}
             return {"status": "ok", "id": entry_id}
         except Exception as e:
             return {"error": f"Failed to add entry: {e}"}
@@ -309,10 +317,12 @@ class KnowledgeServer:
             counts: dict[str, int] = {}
             if source in ("sessions", "all"):
                 from knowlin_mcp.ingest_sessions import SessionIngester
+
                 si = SessionIngester(str(self.project_root))
                 counts["sessions"] = si.ingest(full=full)
             if source in ("docs", "all"):
                 from knowlin_mcp.ingest_docs import DocsIngester
+
                 di = DocsIngester(str(self.project_root))
                 counts["docs"] = di.ingest(full=full)
             total = sum(counts.values())
@@ -330,6 +340,7 @@ class KnowledgeServer:
             self.db._load_index()
             new_count = self.db.count()
             from knowlin_mcp.multi_search import MultiSourceSearch
+
             self.ms = MultiSourceSearch(str(self.project_root))
             return {"status": "ok", "old_count": old_count, "new_count": new_count}
         except Exception as e:
@@ -430,9 +441,7 @@ class KnowledgeServer:
             try:
                 server.settimeout(60.0)
                 conn, _ = server.accept()
-                threading.Thread(
-                    target=self.handle_client, args=(conn,), daemon=True
-                ).start()
+                threading.Thread(target=self.handle_client, args=(conn,), daemon=True).start()
             except socket.timeout:
                 if self.check_idle_timeout():
                     break
@@ -447,9 +456,7 @@ class KnowledgeServer:
         print("Server stopped")
 
 
-def send_command_to_port(
-    port: int, cmd_data: dict, timeout: float = 5.0
-) -> dict | None:
+def send_command_to_port(port: int, cmd_data: dict, timeout: float = 5.0) -> dict | None:
     """Send command to server on specified port."""
     from knowlin_mcp.utils import recv_all
 
