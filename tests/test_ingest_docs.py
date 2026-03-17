@@ -223,15 +223,74 @@ class TestRecursiveSplit:
         assert len(result) >= 2
 
 
+class TestChunkCodeFile:
+    """Tests for code file chunking."""
+
+    def test_splits_c_functions(self):
+        ingester = DocsIngester.__new__(DocsIngester)
+        code = (
+            '#include <zephyr/kernel.h>\n\n'
+            'static int conn_create(struct bt_conn *conn) {\n'
+            '    /* Create a new connection */\n'
+            '    int err = bt_conn_init(conn);\n'
+            '    return err;\n'
+            '}\n\n'
+            'void conn_destroy(struct bt_conn *conn) {\n'
+            '    /* Tear down connection and free resources */\n'
+            '    bt_conn_cleanup(conn);\n'
+            '    k_free(conn);\n'
+            '}\n'
+        )
+        chunks = ingester._chunk_code_file(code, "conn.c")
+        titles = [c["title"] for c in chunks]
+        assert any("conn_create" in t for t in titles)
+        assert any("conn_destroy" in t for t in titles)
+        for chunk in chunks:
+            assert chunk["source"].startswith("code:")
+
+    def test_splits_python_functions(self):
+        ingester = DocsIngester.__new__(DocsIngester)
+        code = (
+            'import os\n\n'
+            'def process_data(items):\n'
+            '    """Process a list of items and return results."""\n'
+            '    return [transform(i) for i in items]\n\n'
+            'class DataManager:\n'
+            '    """Manages data lifecycle and persistence."""\n'
+            '    def __init__(self):\n'
+            '        self.data = []\n'
+        )
+        chunks = ingester._chunk_code_file(code, "manager.py")
+        titles = [c["title"] for c in chunks]
+        assert any("def process_data" in t for t in titles)
+        assert any("class DataManager" in t for t in titles)
+
+    def test_empty_code_returns_empty(self):
+        ingester = DocsIngester.__new__(DocsIngester)
+        assert ingester._chunk_code_file("", "empty.c") == []
+
+    def test_no_functions_returns_whole_file(self):
+        ingester = DocsIngester.__new__(DocsIngester)
+        code = (
+            '#include <stdio.h>\n'
+            '#define MAX_SIZE 100\n'
+            '/* Global config for the module with enough content to pass min */\n'
+            'int global_flag = 0;\n'
+        )
+        chunks = ingester._chunk_code_file(code, "config.h")
+        assert len(chunks) == 1
+        assert chunks[0]["title"] == "config.h"
+
+
 class TestMakeChunk:
     """Tests for chunk creation."""
 
-    def test_creates_valid_entry(self):
+    def test_creates_valid_doc_entry(self):
         ingester = DocsIngester.__new__(DocsIngester)
         chunk = ingester._make_chunk(
             content="This is the content of the chunk",
-            heading="My Section",
-            heading_stack={1: "Main", 2: "My Section"},
+            title="My Section",
+            context_prefix="Main > My Section",
             source_path="guide.md",
         )
         assert chunk["title"] == "My Section"
@@ -239,25 +298,27 @@ class TestMakeChunk:
         assert chunk["type"] == "document"
         assert "_content_hash" in chunk
 
+    def test_creates_valid_code_entry(self):
+        ingester = DocsIngester.__new__(DocsIngester)
+        chunk = ingester._make_chunk(
+            content="int add(int a, int b) { return a + b; }",
+            title="add",
+            context_prefix="source:math.c",
+            source_path="math.c",
+            source_prefix="code",
+        )
+        assert chunk["source"] == "code:math.c"
+        assert chunk["context_prefix"] == "source:math.c"
+
     def test_truncates_long_titles(self):
         ingester = DocsIngester.__new__(DocsIngester)
         chunk = ingester._make_chunk(
             content="Content",
-            heading="A" * 200,
-            heading_stack={},
+            title="A" * 200,
+            context_prefix="",
             source_path="test.md",
         )
         assert len(chunk["title"]) <= 100
-
-    def test_uses_content_as_fallback_title(self):
-        ingester = DocsIngester.__new__(DocsIngester)
-        chunk = ingester._make_chunk(
-            content="This is a chunk without a heading",
-            heading="",
-            heading_stack={},
-            source_path="test.md",
-        )
-        assert chunk["title"].startswith("This is a chunk")
 
 
 class TestContentHash:

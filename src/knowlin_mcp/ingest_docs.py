@@ -199,7 +199,6 @@ class DocsIngester:
         if not text.strip():
             return []
 
-        # Split by heading lines
         heading_pattern = re.compile(r"^(#{1,3})\s+(.+)$", re.MULTILINE)
 
         chunks = []
@@ -207,17 +206,21 @@ class DocsIngester:
         last_pos = 0
         last_heading = ""
 
+        def _make_doc_chunk(content: str) -> dict[str, Any]:
+            # Contextual enrichment: heading hierarchy in context_prefix improves
+            # embedding recall (Anthropic contextual retrieval: +20-49%)
+            hierarchy = " > ".join(heading_stack[lvl] for lvl in sorted(heading_stack))
+            title = last_heading or content[:80].split("\n")[0]
+            return self._make_chunk(content, title, hierarchy, source_path)
+
         for match in heading_pattern.finditer(text):
-            # Save content before this heading
             content = text[last_pos : match.start()].strip()
             if content and len(content) >= MIN_CHUNK_CHARS:
-                chunks.append(self._make_chunk(content, last_heading, heading_stack, source_path))
+                chunks.append(_make_doc_chunk(content))
 
-            # Update heading stack
             level = len(match.group(1))
             heading_text = match.group(2).strip()
             heading_stack[level] = heading_text
-            # Clear deeper levels
             for lvl in list(heading_stack.keys()):
                 if lvl > level:
                     del heading_stack[lvl]
@@ -225,17 +228,15 @@ class DocsIngester:
             last_heading = heading_text
             last_pos = match.end()
 
-        # Don't forget the last section
         content = text[last_pos:].strip()
         if content and len(content) >= MIN_CHUNK_CHARS:
-            chunks.append(self._make_chunk(content, last_heading, heading_stack, source_path))
+            chunks.append(_make_doc_chunk(content))
 
-        # Sub-split oversized chunks
+        # Sub-split sections that exceed the embedding window
         final_chunks = []
         for chunk in chunks:
             if len(chunk["insight"]) > MAX_CHUNK_CHARS:
-                sub_chunks = self._sub_split(chunk)
-                final_chunks.extend(sub_chunks)
+                final_chunks.extend(self._sub_split(chunk))
             else:
                 final_chunks.append(chunk)
 
@@ -244,39 +245,95 @@ class DocsIngester:
     def _make_chunk(
         self,
         content: str,
-        heading: str,
-        heading_stack: dict[int, str],
+        title: str,
+        context_prefix: str,
         source_path: str,
+        source_prefix: str = "doc",
     ) -> dict[str, Any]:
-        """Create an entry dict from a chunk of text."""
-        # Build heading hierarchy as context
-        hierarchy = " > ".join(heading_stack[level] for level in sorted(heading_stack.keys()))
+        """Create an entry dict from a content chunk.
 
-        title = heading or content[:80].split("\n")[0]
+        Content is stored as-is; callers are responsible for size management
+        (sub-splitting via _sub_split or hard-truncating large bodies).
+        """
         if len(title) > 100:
             title = title[:97] + "..."
 
-        # Truncate content independently of hierarchy prefix
-        insight = content[:MAX_CHUNK_CHARS]
-
-        # Contextual enrichment: store hierarchy as context prefix so embeddings
-        # capture document structure (Anthropic contextual retrieval: +20-49%)
-        context_prefix = hierarchy if hierarchy else ""
-
         return {
             "title": title,
-            "insight": insight,
+            "insight": content,
             "context_prefix": context_prefix,
             "type": "document",
             "priority": "medium",
             "keywords": [],
-            "source": f"doc:{source_path}",
+            "source": f"{source_prefix}:{source_path}",
             "date": datetime.now().strftime("%Y-%m-%d"),
             "timestamp": datetime.now().isoformat(),
             "branch": "",
             "related_to": [],
             "_content_hash": self._content_hash(content),
         }
+
+    # Regex patterns for code function/class boundaries.
+    # C/C++ pattern requires opening brace on the same line as the signature;
+    # keyword guard avoids matching control-flow statements (if/for/while/switch).
+    _C_FUNC_RE = re.compile(
+        r"^(?!(?:if|for|while|switch|return)\b)[a-zA-Z_]\w*[\s\*]+\w[\w\s\*]*\([^)]*\)\s*\{",
+        re.MULTILINE,
+    )
+    _PY_DEF_RE = re.compile(r"^(def |class )", re.MULTILINE)
+    _CODE_EXTENSIONS = {".c", ".h", ".py", ".cpp", ".hpp", ".cc"}
+
+    def _chunk_code_file(self, text: str, source_path: str) -> list[dict[str, Any]]:
+        """Split source code into chunks by function/class boundaries."""
+        if not text.strip():
+            return []
+
+        ext = Path(source_path).suffix.lower()
+        pattern = self._PY_DEF_RE if ext == ".py" else self._C_FUNC_RE
+        filename = Path(source_path).name
+
+        split_points = [m.start() for m in pattern.finditer(text)]
+
+        context_prefix = f"source:{source_path}"
+
+        def _add_code_chunk(body: str, title: str) -> dict[str, Any]:
+            # Hard-truncate: splitting code mid-function is not useful
+            return self._make_chunk(
+                body[:MAX_CHUNK_CHARS], title, context_prefix, source_path, "code"
+            )
+
+        if not split_points:
+            # No recognizable function boundaries -- treat whole file as one chunk
+            if len(text) >= MIN_CHUNK_CHARS:
+                return [_add_code_chunk(text, filename)]
+            return []
+
+        chunks: list[dict[str, Any]] = []
+
+        # Preamble: includes, defines, globals before first function
+        preamble = text[: split_points[0]].strip()
+        if preamble and len(preamble) >= MIN_CHUNK_CHARS:
+            chunks.append(_add_code_chunk(preamble, f"{filename} (preamble)"))
+
+        # Each function/class as its own chunk
+        for i, start in enumerate(split_points):
+            end = split_points[i + 1] if i + 1 < len(split_points) else len(text)
+            body = text[start:end].strip()
+            if not body or len(body) < MIN_CHUNK_CHARS:
+                continue
+
+            first_line = body.split("\n")[0].strip()
+            if ext == ".py":
+                # "def func_name(..." or "class ClassName(..." -- strip trailing colon
+                title = first_line.rstrip(":").strip()
+            else:
+                # "static int func_name(params) {" -> extract "func_name"
+                m = re.match(r".*?(\w+)\s*\(", first_line)
+                title = m.group(1) if m else first_line[:80]
+
+            chunks.append(_add_code_chunk(body, title))
+
+        return chunks
 
     def _sub_split(self, chunk: dict[str, Any]) -> list[dict[str, Any]]:
         """Split an oversized chunk into smaller pieces with overlap."""
@@ -486,7 +543,11 @@ class DocsIngester:
                 except ValueError:
                     continue
 
-            chunks = self._chunk_by_headings(content, source_path)
+            ext = path.suffix.lower()
+            if ext in self._CODE_EXTENSIONS:
+                chunks = self._chunk_code_file(content, source_path)
+            else:
+                chunks = self._chunk_by_headings(content, source_path)
 
             old_hashes = set(self._registry.get(file_key, {}).get("chunk_hashes", []))
             current_hashes = [chunk.get("_content_hash", "") for chunk in chunks]
